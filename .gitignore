@@ -1,0 +1,29 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# Build outputs
+build/
+dist/
+*.egg-info/
+
+# Local databases
+*.db
+*.sqlite3
+
+# IDE / Editor
+.idea/
+.vscode/
+.gemini/
+
+# OS specific
+Thumbs.db
+Desktop.ini
+.DS_Store
