@@ -93,6 +93,8 @@ def initialize_database() -> None:
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS bons_livraison (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                numero_bon_livraison TEXT,
+                nom_fournisseur TEXT,
                 reference_interne TEXT NOT NULL,
                 reference_fournisseur TEXT,
                 designation TEXT,
@@ -103,6 +105,16 @@ def initialize_database() -> None:
                 date_creation DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+
+        try:
+            cursor.execute('ALTER TABLE bons_livraison ADD COLUMN numero_bon_livraison TEXT')
+        except sqlite3.OperationalError:
+            pass
+
+        try:
+            cursor.execute('ALTER TABLE bons_livraison ADD COLUMN nom_fournisseur TEXT')
+        except sqlite3.OperationalError:
+            pass
 
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS bons_sortie (
@@ -296,13 +308,17 @@ def create_bon_livraison(data: dict) -> dict:
     qty = int(data.get('quantite', 0) or 0)
     unit = float(data.get('prix_unitaire', 0) or 0)
     total = qty * unit
+    num_bl = data.get('numero_bon_livraison', '').strip()
+    nom_four = data.get('nom_fournisseur', '').strip()
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
         '''
-        INSERT INTO bons_livraison (reference_interne, reference_fournisseur, designation, quantite, prix_unitaire, prix_total, date_livraison)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO bons_livraison (numero_bon_livraison, nom_fournisseur, reference_interne, reference_fournisseur, designation, quantite, prix_unitaire, prix_total, date_livraison)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
+            num_bl,
+            nom_four,
             data.get('reference_interne', '').strip(),
             data.get('reference_fournisseur', '').strip(),
             data.get('designation', '').strip(),
@@ -315,7 +331,7 @@ def create_bon_livraison(data: dict) -> dict:
     bon_id = cursor.lastrowid
     conn.commit()
     conn.close()
-    return {"id": bon_id, "reference_interne": data.get('reference_interne', '').strip(), "quantite": qty, "prix_unitaire": unit, "prix_total": total}
+    return {"id": bon_id, "numero_bon_livraison": num_bl, "nom_fournisseur": nom_four, "reference_interne": data.get('reference_interne', '').strip(), "quantite": qty, "prix_unitaire": unit, "prix_total": total}
 
 
 def get_all_bons_livraison() -> list[dict]:
@@ -408,10 +424,12 @@ def update_bon_livraison(bon_id: int, data: dict) -> None:
     cursor = conn.cursor()
     cursor.execute(
         '''UPDATE bons_livraison SET
-            reference_interne = ?, reference_fournisseur = ?, designation = ?,
+            numero_bon_livraison = ?, nom_fournisseur = ?, reference_interne = ?, reference_fournisseur = ?, designation = ?,
             quantite = ?, prix_unitaire = ?, prix_total = ?, date_livraison = ?
            WHERE id = ?''',
         (
+            data.get('numero_bon_livraison', '').strip(),
+            data.get('nom_fournisseur', '').strip(),
             data.get('reference_interne', '').strip(),
             data.get('reference_fournisseur', '').strip(),
             data.get('designation', '').strip(),
@@ -433,7 +451,7 @@ def update_piece_stock_after_sortie(piece_id: int, quantite_sortie: int) -> None
 
 
 def get_engin_categories() -> list[str]:
-    default_cats = ['camion', 'clarck', 'leger']
+    default_cats = ['CAMION', 'CLARCK', 'VEHICULE_LEGER', 'REMORQUE']
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('SELECT DISTINCT categorie FROM engins WHERE categorie IS NOT NULL AND TRIM(categorie) != ""')
@@ -442,21 +460,49 @@ def get_engin_categories() -> list[str]:
     
     combined = list(default_cats)
     for c in db_cats:
-        c_lower = c.lower()
-        if not any(x.lower() == c_lower for x in combined):
-            combined.append(c)
+        c_norm = 'VEHICULE_LEGER' if c.lower() == 'leger' else c.upper()
+        if not any(x.upper() == c_norm for x in combined):
+            combined.append(c_norm)
     return combined
 
 
-def get_engin_designations_by_category(categorie: str = 'Tous') -> list[str]:
+def get_engin_designations_by_category(categorie: str | list[str] | tuple = 'Tous') -> list[str]:
+    if isinstance(categorie, str):
+        if not categorie or categorie.lower() in ('tous', 'toutes'):
+            cats = []
+        else:
+            cats = [c.strip() for c in categorie.split(',') if c.strip()]
+    elif isinstance(categorie, (list, tuple)):
+        cats = list(categorie)
+    else:
+        cats = []
+
+    cats_normalized = []
+    for c in cats:
+        if not c or c.lower() in ('tous', 'toutes'):
+            continue
+        if c.lower() == 'leger':
+            cats_normalized.append('VEHICULE_LEGER')
+        else:
+            cats_normalized.append(c.upper())
+
     conn = get_connection()
     cursor = conn.cursor()
-    if not categorie or categorie.lower() == 'tous':
+    if not cats_normalized:
         cursor.execute('SELECT DISTINCT designation FROM engins WHERE designation IS NOT NULL ORDER BY designation')
     else:
+        conditions = []
+        params = []
+        for c in cats_normalized:
+            conditions.append('LOWER(categorie) LIKE ?')
+            params.append(f'%{c.lower()}%')
+            if 'VEHICULE_LEGER' in c:
+                conditions.append('LOWER(categorie) LIKE ?')
+                params.append('%leger%')
+        where_clause = ' OR '.join(conditions)
         cursor.execute(
-            'SELECT DISTINCT designation FROM engins WHERE LOWER(categorie) LIKE ? ORDER BY designation',
-            (f'%{categorie.lower()}%',)
+            f'SELECT DISTINCT designation FROM engins WHERE designation IS NOT NULL AND ({where_clause}) ORDER BY designation',
+            params
         )
     designations = [r['designation'].strip() for r in cursor.fetchall() if r['designation']]
     conn.close()
@@ -490,14 +536,16 @@ def get_dashboard_stats() -> dict:
         SELECT 
             SUM(CASE WHEN LOWER(e.categorie) LIKE '%camion%' THEN 1 ELSE 0 END) as count_camion,
             SUM(CASE WHEN LOWER(e.categorie) LIKE '%clarck%' THEN 1 ELSE 0 END) as count_clarck,
-            SUM(CASE WHEN LOWER(e.categorie) LIKE '%leger%' OR LOWER(e.categorie) LIKE '%véhicule%' THEN 1 ELSE 0 END) as count_leger
+            SUM(CASE WHEN LOWER(e.categorie) LIKE '%leger%' OR LOWER(e.categorie) LIKE '%véhicule%' THEN 1 ELSE 0 END) as count_leger,
+            SUM(CASE WHEN LOWER(e.categorie) LIKE '%remorque%' THEN 1 ELSE 0 END) as count_remorque
         FROM engins e
     ''')
     row = cursor.fetchone()
     c_camion = int(row['count_camion'] or 0)
     c_clarck = int(row['count_clarck'] or 0)
     c_leger = int(row['count_leger'] or 0)
-    c_autres = max(0, total_engins - (c_camion + c_clarck + c_leger))
+    c_remorque = int(row['count_remorque'] or 0)
+    c_autres = max(0, total_engins - (c_camion + c_clarck + c_leger + c_remorque))
 
     conn.close()
 
@@ -515,6 +563,7 @@ def get_dashboard_stats() -> dict:
         'cat_camion': c_camion,
         'cat_clarck': c_clarck,
         'cat_leger': c_leger,
+        'cat_remorque': c_remorque,
         'cat_autres': c_autres,
     }
 

@@ -153,6 +153,21 @@ class OptionsFrame(ctk.CTkFrame):
         make_primary_button(row_printer, '💾 Sauver',
                              command=self._save_printer, width=100).pack(side='left')
 
+        # ── Section 6 : Sécurité Configuration ───────────────────────────────
+        self._section(scroll, '🔒  Sécurité & Mot de Passe de Configuration', COLORS['danger'])
+        sec_card = self._card(scroll)
+
+        row_pwd = ctk.CTkFrame(sec_card, fg_color='transparent')
+        row_pwd.pack(fill='x', padx=16, pady=12)
+
+        ctk.CTkLabel(row_pwd, text='Nouveau mot de passe :', font=FONTS['body_bold'],
+                     text_color=COLORS['text_secondary']).pack(side='left', padx=(0, 8))
+        self.var_config_pwd = tk.StringVar(value=self._config.get('config_password', 'admin'))
+        make_input(row_pwd, placeholder='Mot de passe...',
+                   textvariable=self.var_config_pwd, show='*', width=240).pack(side='left', padx=(0, 8))
+        make_primary_button(row_pwd, '🔒 Enregistrer',
+                             command=self._save_config_pwd, width=150).pack(side='left')
+
         # ── Section 6 : Sauvegarde BDD ────────────────────────────────────────
         self._section(scroll, '💾  Sauvegarde de la Base de Données', COLORS['success'])
         backup_card = self._card(scroll)
@@ -292,6 +307,15 @@ class OptionsFrame(ctk.CTkFrame):
         self._config['imprimante'] = printer
         save_config(self._config)
         messagebox.showinfo('Enregistré', f'Imprimante enregistrée : {printer or "(aucune)"}', parent=self)
+
+    def _save_config_pwd(self):
+        new_pwd = self.var_config_pwd.get().strip()
+        if not new_pwd:
+            messagebox.showwarning('Attention', 'Le mot de passe ne peut pas être vide.', parent=self)
+            return
+        self._config['config_password'] = new_pwd
+        save_config(self._config)
+        messagebox.showinfo('Succès', 'Mot de passe de configuration mis à jour avec succès !', parent=self)
 
     def _backup_db(self):
         now = datetime.now().strftime('%Y%m%d_%H%M%S')

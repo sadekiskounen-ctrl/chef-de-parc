@@ -23,6 +23,7 @@ DEFAULT_CONFIG = {
     'theme': 'light',
     'seuil_global': 5,
     'seuil_augmentation_prix': 15,
+    'config_password': 'admin',
 }
 
 

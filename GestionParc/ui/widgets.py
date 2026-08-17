@@ -377,3 +377,142 @@ class CircularProgressWidget(ctk.CTkFrame):
             fill='#64748B'
         )
 
+
+class MultiSelectCombobox(ctk.CTkFrame):
+    """
+    Combobox à sélection multiple avec cases à cocher.
+    """
+    def __init__(self, parent, options: list[str], width=200, command=None, default_all=True):
+        super().__init__(parent, fg_color='transparent')
+        import tkinter as tk
+        self.options = [opt for opt in options if opt.lower() != 'tous']
+        self.command = command
+        self._selected_map = {opt: True if default_all else False for opt in self.options}
+
+        self.btn = ctk.CTkButton(
+            self,
+            text=self._format_display_text(),
+            width=width,
+            height=40,
+            fg_color='#EBF4FF',
+            hover_color='#D0E4FF',
+            border_color='#90C0F5',
+            border_width=1,
+            text_color=COLORS['text_primary'],
+            font=FONTS['body'],
+            corner_radius=8,
+            anchor='w',
+            command=self._open_popup
+        )
+        self.btn.pack(fill='x', expand=True)
+
+    def _format_display_text(self) -> str:
+        selected = [opt for opt, is_sel in self._selected_map.items() if is_sel]
+        if not selected or len(selected) == len(self.options):
+            return "Tous"
+        return ", ".join(selected)
+
+    def update_options(self, options: list[str]):
+        new_opts = [opt for opt in options if opt.lower() != 'tous']
+        curr_selected = set(self.get_selected())
+        self.options = new_opts
+        self._selected_map = {opt: (opt in curr_selected if curr_selected else True) for opt in self.options}
+        self.btn.configure(text=self._format_display_text())
+
+    def _open_popup(self):
+        import tkinter as tk
+        top = ctk.CTkToplevel(self)
+        top.title("Sélectionner")
+        top.geometry("260x280")
+        top.resizable(False, False)
+        top.transient(self.winfo_toplevel())
+        top.grab_set()
+        # Fond blanc, texte noir
+        top.configure(fg_color='#FFFFFF')
+
+        try:
+            top.update_idletasks()
+            bx = self.winfo_rootx()
+            by = self.winfo_rooty() + self.winfo_height() + 4
+            top.geometry(f"+{bx}+{by}")
+        except Exception:
+            pass
+
+        scroll = ctk.CTkScrollableFrame(top, fg_color='#FFFFFF', scrollbar_button_color='#CBD5E1', scrollbar_button_hover_color='#94A3B8')
+        scroll.pack(fill='both', expand=True, padx=8, pady=(8, 4))
+
+        var_all = tk.BooleanVar(value=all(self._selected_map.values()))
+        chk_vars = {}
+
+        def _toggle_all():
+            val = var_all.get()
+            for opt, v in chk_vars.items():
+                v.set(val)
+                self._selected_map[opt] = val
+            self._update_display()
+
+        cb_all = ctk.CTkCheckBox(
+            scroll, text="Tout sélectionner / Vider", variable=var_all,
+            command=_toggle_all, font=FONTS['body_bold'],
+            text_color=COLORS['primary'],
+            fg_color=COLORS['primary'], hover_color=COLORS['primary_dark'],
+            checkmark_color='#FFFFFF'
+        )
+        cb_all.pack(anchor='w', pady=4, padx=4)
+        ctk.CTkFrame(scroll, fg_color='#CBD5E1', height=1).pack(fill='x', pady=4)
+
+        def _on_item_toggle(opt):
+            self._selected_map[opt] = chk_vars[opt].get()
+            var_all.set(all(self._selected_map.values()))
+            self._update_display()
+
+        for opt in self.options:
+            v = tk.BooleanVar(value=self._selected_map.get(opt, True))
+            chk_vars[opt] = v
+            cb = ctk.CTkCheckBox(
+                scroll, text=opt, variable=v,
+                command=lambda o=opt: _on_item_toggle(o),
+                font=FONTS['body'],
+                text_color='#0F172A',
+                fg_color=COLORS['primary'], hover_color=COLORS['primary_dark'],
+                checkmark_color='#FFFFFF'
+            )
+            cb.pack(anchor='w', pady=4, padx=4)
+
+        btn_ok = ctk.CTkButton(
+            top, text="Valider", command=top.destroy,
+            fg_color=COLORS['primary'], hover_color=COLORS['primary_dark'],
+            text_color='#FFFFFF', height=32, corner_radius=6
+        )
+        btn_ok.pack(pady=(4, 8))
+
+    def _update_display(self):
+        text = self._format_display_text()
+        self.btn.configure(text=text)
+        if self.command:
+            try:
+                self.command(text)
+            except Exception:
+                pass
+
+    def get_selected(self) -> list[str]:
+        selected = [opt for opt, is_sel in self._selected_map.items() if is_sel]
+        if not selected or len(selected) == len(self.options):
+            return ['Tous']
+        return selected
+
+    def get(self) -> str:
+        sel = self.get_selected()
+        return "Tous" if sel == ['Tous'] else ", ".join(sel)
+
+    def set_selected(self, values: list[str] | str):
+        if isinstance(values, str):
+            if values.lower() in ('tous', 'toutes', ''):
+                values = list(self.options)
+            else:
+                values = [v.strip() for v in values.split(',')]
+        val_set = set(v.lower() for v in values)
+        for opt in self.options:
+            self._selected_map[opt] = (opt.lower() in val_set or 'tous' in val_set)
+        self.btn.configure(text=self._format_display_text())
+

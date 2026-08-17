@@ -32,38 +32,48 @@ class BonLivraisonFrame(ctk.CTkFrame):
         form = ctk.CTkFrame(self, fg_color=COLORS['bg_card'], corner_radius=16, border_width=1, border_color=COLORS['border'])
         form.grid(row=1, column=0, sticky='ew', padx=18, pady=(0, 12))
 
-        # Ligne 1 : Références
-        ctk.CTkLabel(form, text='Référence interne', font=FONTS['body_bold'], text_color=COLORS['text_primary']).grid(row=0, column=0, padx=12, pady=(12, 4), sticky='w')
+        # Ligne 1 : N° BL, Nom Fournisseur, Réf Interne, Réf Fournisseur
+        ctk.CTkLabel(form, text='N° Bon de livraison', font=FONTS['body_bold'], text_color=COLORS['text_primary']).grid(row=0, column=0, padx=12, pady=(12, 4), sticky='w')
+        self.e_num_bl = make_input(form, 'BL-001', 160)
+        self.e_num_bl.grid(row=1, column=0, padx=12, pady=(0, 10), sticky='w')
+        self.form_fields.append(self.e_num_bl)
+
+        ctk.CTkLabel(form, text='Nom du fournisseur', font=FONTS['body_bold'], text_color=COLORS['text_primary']).grid(row=0, column=1, padx=12, pady=(12, 4), sticky='w')
+        self.e_nom_four = make_input(form, 'SARL Fournisseur', 180)
+        self.e_nom_four.grid(row=1, column=1, padx=12, pady=(0, 10), sticky='w')
+        self.form_fields.append(self.e_nom_four)
+
+        ctk.CTkLabel(form, text='Référence interne', font=FONTS['body_bold'], text_color=COLORS['text_primary']).grid(row=0, column=2, padx=12, pady=(12, 4), sticky='w')
         piece_refs = [p['reference_interne'] for p in get_all_pieces()]
         self.e_ref = make_combobox(form, piece_refs if piece_refs else ['PI-001'], width=180)
-        self.e_ref.grid(row=1, column=0, padx=12, pady=(0, 10), sticky='w')
+        self.e_ref.grid(row=1, column=2, padx=12, pady=(0, 10), sticky='w')
         self.e_ref.configure(command=self._on_piece_ref_changed)
         self.form_fields.append(self.e_ref)
 
-        ctk.CTkLabel(form, text='Référence fournisseur', font=FONTS['body_bold'], text_color=COLORS['text_primary']).grid(row=0, column=1, padx=12, pady=(12, 4), sticky='w')
+        ctk.CTkLabel(form, text='Référence fournisseur', font=FONTS['body_bold'], text_color=COLORS['text_primary']).grid(row=0, column=3, padx=12, pady=(12, 4), sticky='w')
         self.e_four = make_input(form, 'FR-001', 180)
-        self.e_four.grid(row=1, column=1, padx=12, pady=(0, 10), sticky='w')
+        self.e_four.grid(row=1, column=3, padx=12, pady=(0, 10), sticky='w')
         self.form_fields.append(self.e_four)
 
-        ctk.CTkLabel(form, text='Désignation', font=FONTS['body_bold'], text_color=COLORS['text_primary']).grid(row=0, column=2, padx=12, pady=(12, 4), sticky='w')
-        self.e_designation = make_input(form, 'Désignation', 220)
-        self.e_designation.grid(row=1, column=2, padx=12, pady=(0, 10), sticky='w')
+        # Ligne 2 : Désignation, Quantité, Prix, Date
+        ctk.CTkLabel(form, text='Désignation', font=FONTS['body_bold'], text_color=COLORS['text_primary']).grid(row=2, column=0, padx=12, pady=(8, 4), sticky='w')
+        self.e_designation = make_input(form, 'Désignation', 200)
+        self.e_designation.grid(row=3, column=0, padx=12, pady=(0, 10), sticky='w')
         self.form_fields.append(self.e_designation)
 
-        # Ligne 2 : Quantité, Prix, Date
-        ctk.CTkLabel(form, text='Quantité', font=FONTS['body_bold'], text_color=COLORS['text_primary']).grid(row=2, column=0, padx=12, pady=(8, 4), sticky='w')
+        ctk.CTkLabel(form, text='Quantité', font=FONTS['body_bold'], text_color=COLORS['text_primary']).grid(row=2, column=1, padx=12, pady=(8, 4), sticky='w')
         self.e_qte = make_input(form, '12', 120)
-        self.e_qte.grid(row=3, column=0, padx=12, pady=(0, 10), sticky='w')
+        self.e_qte.grid(row=3, column=1, padx=12, pady=(0, 10), sticky='w')
         self.form_fields.append(self.e_qte)
 
-        ctk.CTkLabel(form, text='Prix unitaire', font=FONTS['body_bold'], text_color=COLORS['text_primary']).grid(row=2, column=1, padx=12, pady=(8, 4), sticky='w')
+        ctk.CTkLabel(form, text='Prix unitaire', font=FONTS['body_bold'], text_color=COLORS['text_primary']).grid(row=2, column=2, padx=12, pady=(8, 4), sticky='w')
         self.e_prix = make_input(form, '150', 140)
-        self.e_prix.grid(row=3, column=1, padx=12, pady=(0, 10), sticky='w')
+        self.e_prix.grid(row=3, column=2, padx=12, pady=(0, 10), sticky='w')
         self.form_fields.append(self.e_prix)
 
-        ctk.CTkLabel(form, text='Date livraison', font=FONTS['body_bold'], text_color=COLORS['text_primary']).grid(row=2, column=2, padx=12, pady=(8, 4), sticky='w')
+        ctk.CTkLabel(form, text='Date livraison', font=FONTS['body_bold'], text_color=COLORS['text_primary']).grid(row=2, column=3, padx=12, pady=(8, 4), sticky='w')
         self.e_date = DatePickerWidget(form, placeholder='AAAA-MM-JJ', width=180, default_value=datetime.now().strftime('%Y-%m-%d'))
-        self.e_date.grid(row=3, column=2, padx=12, pady=(0, 10), sticky='w')
+        self.e_date.grid(row=3, column=3, padx=12, pady=(0, 10), sticky='w')
 
         # Boutons
         btn_row = ctk.CTkFrame(form, fg_color='transparent')
@@ -96,7 +106,7 @@ class BonLivraisonFrame(ctk.CTkFrame):
 
 
         ctk.CTkLabel(filter_bar, text='🔍 Recherche :', font=FONTS['body_bold'], text_color=COLORS['text_primary']).grid(row=0, column=4, padx=10, pady=10, sticky='w')
-        self.filter_query = make_input(filter_bar, 'Réf / Désignation...', 160)
+        self.filter_query = make_input(filter_bar, 'N° BL / Fournisseur / Réf...', 180)
         self.filter_query.grid(row=0, column=5, padx=6, pady=10)
 
         make_primary_button(filter_bar, '🔍 Filtrer', self.refresh, width=110).grid(row=0, column=6, padx=8, pady=10)
@@ -108,8 +118,10 @@ class BonLivraisonFrame(ctk.CTkFrame):
         self.grid_rowconfigure(3, weight=1)
         table_frame.grid_columnconfigure(0, weight=1)
 
-        self.tree = ttk.Treeview(table_frame, columns=('id', 'ref', 'fournisseur', 'designation', 'qte', 'prix', 'total', 'date'), show='headings', height=13)
+        self.tree = ttk.Treeview(table_frame, columns=('id', 'num_bl', 'nom_fournisseur', 'ref', 'fournisseur', 'designation', 'qte', 'prix', 'total', 'date'), show='headings', height=13)
         self.tree.heading('id', text='ID')
+        self.tree.heading('num_bl', text='N° BL')
+        self.tree.heading('nom_fournisseur', text='Fournisseur')
         self.tree.heading('ref', text='Réf Interne')
         self.tree.heading('fournisseur', text='Réf Fournisseur')
         self.tree.heading('designation', text='Désignation')
@@ -117,9 +129,9 @@ class BonLivraisonFrame(ctk.CTkFrame):
         self.tree.heading('prix', text='Prix Unitaire')
         self.tree.heading('total', text='Total')
         self.tree.heading('date', text='Date Livraison')
-        self.tree.column('id', width=50, anchor='center')
-        for col in ['ref', 'fournisseur', 'designation', 'qte', 'prix', 'total', 'date']:
-            self.tree.column(col, anchor='center', width=120)
+        self.tree.column('id', width=40, anchor='center', stretch=False)
+        for col in ['num_bl', 'nom_fournisseur', 'ref', 'fournisseur', 'designation', 'qte', 'prix', 'total', 'date']:
+            self.tree.column(col, anchor='center', width=110, stretch=True)
         self.tree.pack(fill='both', expand=True, padx=10, pady=10)
 
         self.tree.bind('<ButtonRelease-1>', self.on_row_select)
@@ -149,6 +161,8 @@ class BonLivraisonFrame(ctk.CTkFrame):
         if hasattr(self, 'e_ref') and piece_refs:
             self.e_ref.configure(values=piece_refs)
 
+        self.e_num_bl.delete(0, 'end')
+        self.e_nom_four.delete(0, 'end')
         self.e_four.delete(0, 'end')
         self.e_designation.delete(0, 'end')
         self.e_qte.delete(0, 'end')
@@ -168,12 +182,14 @@ class BonLivraisonFrame(ctk.CTkFrame):
             return
         self.clear_fields()
         self._selected_bon_id = int(values[0])
-        self.e_ref.set(values[1])
-        self.e_four.insert(0, values[2])
-        self.e_designation.insert(0, values[3])
-        self.e_qte.insert(0, str(values[4]))
+        self.e_num_bl.insert(0, values[1])
+        self.e_nom_four.insert(0, values[2])
+        self.e_ref.set(values[3])
+        self.e_four.insert(0, values[4])
+        self.e_designation.insert(0, values[5])
+        self.e_qte.insert(0, str(values[6]))
         self.e_date.delete(0, 'end')
-        self.e_date.insert(0, values[7])
+        self.e_date.insert(0, values[9])
         self.btn_modif.configure(state='normal')
         self.btn_save.configure(state='disabled')
 
@@ -182,6 +198,8 @@ class BonLivraisonFrame(ctk.CTkFrame):
             messagebox.showwarning('Attention', 'Sélectionnez un bon de livraison à modifier.')
             return
         data = {
+            'numero_bon_livraison': self.e_num_bl.get().strip(),
+            'nom_fournisseur': self.e_nom_four.get().strip(),
             'reference_interne': self.e_ref.get().strip(),
             'reference_fournisseur': self.e_four.get().strip(),
             'designation': self.e_designation.get().strip(),
@@ -213,7 +231,7 @@ class BonLivraisonFrame(ctk.CTkFrame):
             return
 
         bon_id = values[0]
-        ref = values[1]
+        ref = values[3]
         if messagebox.askyesno('Confirmation', f'Voulez-vous vraiment supprimer le bon de livraison ID {bon_id} (Réf: {ref}) ?'):
             delete_bon_livraison(int(bon_id))
             self.clear_fields()
@@ -221,6 +239,8 @@ class BonLivraisonFrame(ctk.CTkFrame):
 
     def add_bon(self):
         data = {
+            'numero_bon_livraison': self.e_num_bl.get().strip(),
+            'nom_fournisseur': self.e_nom_four.get().strip(),
             'reference_interne': self.e_ref.get().strip(),
             'reference_fournisseur': self.e_four.get().strip(),
             'designation': self.e_designation.get().strip(),
@@ -261,16 +281,20 @@ class BonLivraisonFrame(ctk.CTkFrame):
             # Filtre date fin
             if end_d and date_liv > end_d:
                 continue
-            # Filtre texte (référence, fournisseur, désignation)
+            # Filtre texte (num_bl, nom_fournisseur, référence, fournisseur, désignation)
             if query:
+                num_bl = (bon.get('numero_bon_livraison') or '').lower()
+                nom_four = (bon.get('nom_fournisseur') or '').lower()
                 ref = (bon.get('reference_interne') or '').lower()
                 four = (bon.get('reference_fournisseur') or '').lower()
                 desig = (bon.get('designation') or '').lower()
-                if query not in ref and query not in four and query not in desig:
+                if query not in num_bl and query not in nom_four and query not in ref and query not in four and query not in desig:
                     continue
 
             self.tree.insert('', 'end', values=(
                 bon['id'],
+                bon.get('numero_bon_livraison', '—'),
+                bon.get('nom_fournisseur', '—'),
                 bon['reference_interne'],
                 bon.get('reference_fournisseur', ''),
                 bon.get('designation', ''),

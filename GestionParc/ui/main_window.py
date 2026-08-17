@@ -5,6 +5,9 @@ from pathlib import Path
 import customtkinter as ctk
 from PIL import Image, ImageTk
 
+from tkinter import messagebox
+
+from services.config_manager import get_config
 from ui.dashboard import DashboardFrame
 from ui.engins import EnginsFrame
 from ui.pieces import PiecesFrame
@@ -13,6 +16,7 @@ from ui.bon_livraison import BonLivraisonFrame
 from ui.bon_sortie import BonSortieFrame
 from ui.options import OptionsFrame
 from ui.theme import COLORS, FONTS, SIDEBAR_ITEMS
+from ui.widgets import make_primary_button, make_secondary_button
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 BASE_DIR = Path(getattr(sys, '_MEIPASS', ROOT_DIR))
@@ -22,13 +26,69 @@ ICO_PATH = ASSET_DIR / 'ayris.ico'
 WATERMARK_PATH = ASSET_DIR / 'watermark.png'
 
 
+class PasswordPromptDialog(ctk.CTkToplevel):
+    def __init__(self, parent, title="Zone Sécurisée", prompt="Saisissez le mot de passe de configuration :"):
+        super().__init__(parent)
+        self.title(title)
+        self.geometry("420x220")
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+        self.result = None
+        self.configure(fg_color=COLORS['bg_card'])
+
+        try:
+            parent.update_idletasks()
+            pw = parent.winfo_width()
+            ph = parent.winfo_height()
+            px = parent.winfo_x()
+            py = parent.winfo_y()
+            x = max(0, px + (pw - 420) // 2)
+            y = max(0, py + (ph - 220) // 2)
+            self.geometry(f"+{x}+{y}")
+        except Exception:
+            pass
+
+        ctk.CTkLabel(self, text="🔒 Accès Sécurisé", font=FONTS['subtitle'], text_color=COLORS['primary']).pack(pady=(16, 4))
+        ctk.CTkLabel(self, text=prompt, font=FONTS['body'], text_color=COLORS['text_secondary']).pack(pady=(0, 12))
+
+        self.e_pwd = ctk.CTkEntry(self, show='*', width=280, font=FONTS['body'], height=38)
+        self.e_pwd.pack(pady=(0, 16))
+        self.e_pwd.focus()
+        self.e_pwd.bind('<Return>', lambda e: self._on_ok())
+
+        btn_box = ctk.CTkFrame(self, fg_color='transparent')
+        btn_box.pack()
+        make_primary_button(btn_box, "Déverrouiller", self._on_ok, width=130).pack(side='left', padx=6)
+        make_secondary_button(btn_box, "Annuler", self._on_cancel, width=110).pack(side='left', padx=6)
+
+        self.wait_window()
+
+    def _on_ok(self):
+        self.result = self.e_pwd.get()
+        self.destroy()
+
+    def _on_cancel(self):
+        self.result = None
+        self.destroy()
+
+
 class MainWindow(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title('SARL NOMADE Ayris — Gestionnaire de Parc')
-        self.geometry('1500x900')
-        self.minsize(1200, 720)
+        
+        # Adaptabilité dynamique selon l'écran et la résolution
+        screen_w = self.winfo_screenwidth()
+        screen_h = self.winfo_screenheight()
+        win_w = max(1100, min(1600, int(screen_w * 0.88)))
+        win_h = max(680, min(950, int(screen_h * 0.84)))
+        pos_x = max(0, (screen_w - win_w) // 2)
+        pos_y = max(0, (screen_h - win_h) // 2)
+        self.geometry(f"{win_w}x{win_h}+{pos_x}+{pos_y}")
+        self.minsize(1000, 640)
         self.resizable(True, True)
+
         self.configure(fg_color=COLORS['bg_dark'])
         self._logo_images = []
         self._setup_icon()
@@ -149,6 +209,14 @@ class MainWindow(ctk.CTk):
                 pass
 
     def navigate_to(self, key):
+        # Sécurité : Vérification du mot de passe pour la page de configuration
+        if key == 'options':
+            expected_pwd = get_config('config_password', 'admin')
+            dlg = PasswordPromptDialog(self)
+            if dlg.result != expected_pwd:
+                messagebox.showerror('Accès refusé', 'Mot de passe de configuration incorrect.', parent=self)
+                return
+
         if self._active_key and self._active_key in self._nav_buttons:
             self._nav_buttons[self._active_key].configure(fg_color='transparent', text_color=COLORS['sidebar_text'])
 

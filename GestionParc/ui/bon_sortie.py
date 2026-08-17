@@ -104,9 +104,9 @@ class BonSortieFrame(ctk.CTkFrame):
         self.tree.heading('qte', text='Qté')
         self.tree.heading('date', text='Date & Heure')
         self.tree.heading('user', text='Utilisateur')
-        self.tree.column('id', width=50, anchor='center')
+        self.tree.column('id', width=50, anchor='center', stretch=False)
         for col in ['ref', 'piece', 'engin', 'unite', 'qte', 'date', 'user']:
-            self.tree.column(col, anchor='center', width=110)
+            self.tree.column(col, anchor='center', width=110, stretch=True)
         self.tree.pack(fill='both', expand=True, padx=10, pady=10)
 
         self.tree.bind('<ButtonRelease-1>', self.on_row_select)
