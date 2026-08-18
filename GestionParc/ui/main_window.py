@@ -216,6 +216,13 @@ class MainWindow(ctk.CTk):
             if dlg.result != expected_pwd:
                 messagebox.showerror('Accès refusé', 'Mot de passe de configuration incorrect.', parent=self)
                 return
+            # Toujours recréer la frame Options pour éviter une page vide
+            if 'options' in self._frames:
+                try:
+                    self._frames['options'].destroy()
+                except Exception:
+                    pass
+                del self._frames['options']
 
         if self._active_key and self._active_key in self._nav_buttons:
             self._nav_buttons[self._active_key].configure(fg_color='transparent', text_color=COLORS['sidebar_text'])
@@ -249,7 +256,7 @@ class MainWindow(ctk.CTk):
         target_frame = self._frames[key]
         target_frame.grid(row=0, column=0, sticky='nsew')
         target_frame.tkraise()
-        if hasattr(target_frame, 'refresh'):
+        if hasattr(target_frame, 'refresh') and key != 'options':
             try:
                 target_frame.refresh()
             except Exception:
