@@ -175,23 +175,39 @@ class PiecesFrame(ctk.CTkFrame):
 
     def _on_category_changed(self, choice=None):
         selected_cats = self.filter_categorie.get_selected()
-        marques = ['Toutes'] + get_engin_designations_by_category(selected_cats)
-        self.filter_marque.configure(values=marques)
-        self.filter_marque.set('Toutes')
+        is_parc = any(c.strip().upper() == 'PARC' for c in selected_cats)
+        if is_parc:
+            self.filter_marque.configure(values=['Toutes'], state='disabled')
+            self.filter_marque.set('Toutes')
+        else:
+            marques = ['Toutes'] + get_engin_designations_by_category(selected_cats)
+            self.filter_marque.configure(values=marques, state='normal')
+            self.filter_marque.set('Toutes')
 
     def _on_form_cat_changed(self, choice=None):
         selected_cats = self.combo_cat_engin.get_selected()
-        marques = get_engin_designations_by_category(selected_cats)
+        is_parc = any(c.strip().upper() == 'PARC' for c in selected_cats)
         if hasattr(self, 'combo_marque_engin'):
-            self.combo_marque_engin.configure(values=marques if marques else ['Aucune marque'])
-            if marques:
-                self.combo_marque_engin.set(marques[0])
-            else:
+            if is_parc:
+                self.combo_marque_engin.configure(values=['Aucune marque'], state='disabled')
                 self.combo_marque_engin.set('Aucune marque')
+            else:
+                marques = get_engin_designations_by_category(selected_cats)
+                self.combo_marque_engin.configure(values=marques if marques else ['Aucune marque'], state='normal')
+                if marques:
+                    self.combo_marque_engin.set(marques[0])
+                else:
+                    self.combo_marque_engin.set('Aucune marque')
 
     def _get_selected_engin(self):
         selected_cats = [c.lower() for c in self.combo_cat_engin.get_selected()]
         marque = self.combo_marque_engin.get().strip()
+        if 'parc' in selected_cats or marque == 'Aucune marque':
+            engins = get_all_engins()
+            for e in engins:
+                if (e['categorie'] or '').lower() == 'parc':
+                    return e
+            return None
         engins = get_all_engins()
         for e in engins:
             e_cat = (e['categorie'] or '').lower()
@@ -204,7 +220,7 @@ class PiecesFrame(ctk.CTkFrame):
         for e in engins:
             if (e['designation'] or '').strip().lower() == marque.lower():
                 return e
-        return engins[0] if engins else None
+        return None
 
     def _reset_filters(self):
         self._filter_critique_only = False
@@ -222,9 +238,12 @@ class PiecesFrame(ctk.CTkFrame):
             self.combo_cat_engin.update_options(cats_form)
             self.combo_cat_engin.set_selected('Tous')
         marques_form = get_engin_designations_by_category('Tous')
-        if hasattr(self, 'combo_marque_engin') and marques_form:
-            self.combo_marque_engin.configure(values=marques_form)
-            self.combo_marque_engin.set(marques_form[0])
+        if hasattr(self, 'combo_marque_engin'):
+            self.combo_marque_engin.configure(values=marques_form if marques_form else ['Aucune marque'], state='normal')
+            if marques_form:
+                self.combo_marque_engin.set(marques_form[0])
+            else:
+                self.combo_marque_engin.set('Aucune marque')
         self.e_date.set('')
         self._selected_piece_id = None
         self.btn_modif.configure(state='disabled')

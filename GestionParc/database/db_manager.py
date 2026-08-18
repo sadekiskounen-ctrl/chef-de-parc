@@ -132,7 +132,7 @@ def initialize_database() -> None:
             )
         ''')
 
-        families = ['CARROSSERIE', 'MOTEUR', 'TRANSMISSION', 'FREINAGE', 'ELECTRIQUE', 'SUSPENSION']
+        families = ['CARROSSERIE', 'MOTEUR', 'TRANSMISSION', 'FREINAGE', 'ELECTRIQUE', 'SUSPENSION', 'LAVAGE']
         for name in families:
             cursor.execute('INSERT OR IGNORE INTO familles_pieces (nom) VALUES (?)', (name,))
 
@@ -148,6 +148,11 @@ def get_famille_id_by_name(name: str) -> int | None:
     cursor = conn.cursor()
     cursor.execute('SELECT id FROM familles_pieces WHERE nom = ?', (name.upper(),))
     row = cursor.fetchone()
+    if not row:
+        cursor.execute('INSERT OR IGNORE INTO familles_pieces (nom) VALUES (?)', (name.upper(),))
+        conn.commit()
+        cursor.execute('SELECT id FROM familles_pieces WHERE nom = ?', (name.upper(),))
+        row = cursor.fetchone()
     conn.close()
     return row['id'] if row else None
 
@@ -451,7 +456,7 @@ def update_piece_stock_after_sortie(piece_id: int, quantite_sortie: int) -> None
 
 
 def get_engin_categories() -> list[str]:
-    default_cats = ['CAMION', 'CLARCK', 'VEHICULE_LEGER', 'REMORQUE']
+    default_cats = ['CAMION', 'CLARCK', 'VEHICULE_LEGER', 'REMORQUE', 'PARC']
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('SELECT DISTINCT categorie FROM engins WHERE categorie IS NOT NULL AND TRIM(categorie) != ""')
@@ -590,7 +595,7 @@ def ensure_demo_data() -> None:
 
         cursor.execute('SELECT id, nom FROM familles_pieces ORDER BY id')
         famille_ids = {row['nom'].upper(): row['id'] for row in cursor.fetchall()}
-        for family_name in ['CARROSSERIE', 'MOTEUR', 'TRANSMISSION', 'FREINAGE', 'ELECTRIQUE', 'SUSPENSION']:
+        for family_name in ['CARROSSERIE', 'MOTEUR', 'TRANSMISSION', 'FREINAGE', 'ELECTRIQUE', 'SUSPENSION', 'LAVAGE']:
             if family_name not in famille_ids:
                 cursor.execute('INSERT INTO familles_pieces (nom) VALUES (?)', (family_name,))
         conn.commit()
