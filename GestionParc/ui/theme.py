@@ -47,7 +47,7 @@ SIDEBAR_ITEMS = [
     {'key': 'engins', 'icon': '🚜', 'label': 'Engins'},
     {'key': 'pieces', 'icon': '🔧', 'label': 'Pièces'},
     {'key': 'prix', 'icon': '💰', 'label': 'Prix'},
-    {'key': 'bon_livraison', 'icon': '📥', 'label': 'Bon de livraison'},
+    {'key': 'bon_livraison', 'icon': '📥', 'label': 'Bon de réception'},
     {'key': 'bon_sortie', 'icon': '📤', 'label': 'Bon de sortie'},
     {'key': 'options', 'icon': '⚙️', 'label': 'Configuration'},
 ]
@@ -63,3 +63,31 @@ def format_money(value, currency='DZD'):
     except (TypeError, ValueError):
         return f'0 {currency}'
     return f'{amount:,.2f} {currency}'
+
+
+def parse_qty(value) -> float:
+    """Convertit une chaîne ou un nombre en float en gérant la virgule ou le point."""
+    if value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    s = str(value).strip().replace(',', '.')
+    if not s:
+        return 0.0
+    return float(s)
+
+
+def format_qty(value, unite='') -> str:
+    """Formate une quantité sans décimales inutiles (ex: 5 au lieu de 5.0, ou 2.5)."""
+    try:
+        f = float(value)
+        if f.is_integer():
+            s = f"{int(f)}"
+        else:
+            s = f"{f:.2f}".rstrip('0').rstrip('.')
+        if unite:
+            return f"{s} {unite}"
+        return s
+    except (TypeError, ValueError):
+        return f"{value} {unite}".strip()
+

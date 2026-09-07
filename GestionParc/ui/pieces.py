@@ -6,7 +6,7 @@ from database.db_manager import (
     get_all_engins, get_all_pieces, get_engin_by_code, get_famille_id_by_name,
     get_engin_categories, get_engin_designations_by_category
 )
-from ui.theme import COLORS, FAMILLES_PIECES, FONTS, format_money
+from ui.theme import COLORS, FAMILLES_PIECES, FONTS, format_money, format_qty, parse_qty
 from ui.widgets import (
     make_input, make_primary_button, make_secondary_button, make_danger_button,
     make_combobox, DatePickerWidget, bind_tree_clear_selection, MultiSelectCombobox
@@ -230,9 +230,18 @@ class PiecesFrame(ctk.CTkFrame):
         self.refresh()
 
     def clear_fields(self):
-        for w in [self.e_ref, self.e_ref_f, self.e_designation,
-                  self.e_qte, self.e_seuil, self.e_emplacement, self.e_ancien, self.e_nouveau]:
-            w.delete(0, 'end')
+        self._selected_piece_id = None
+        for f in self.form_fields:
+            if isinstance(f, ctk.CTkEntry):
+                f.delete(0, 'end')
+            elif isinstance(f, DatePickerWidget):
+                f.clear()
+            elif isinstance(f, ctk.CTkComboBox):
+                vals = f.cget('values')
+                if vals:
+                    f.set(vals[0])
+            elif isinstance(f, MultiSelectCombobox):
+                f.clear_selection()
         cats_form = get_engin_categories()
         if hasattr(self, 'combo_cat_engin'):
             self.combo_cat_engin.update_options(cats_form)
@@ -240,12 +249,7 @@ class PiecesFrame(ctk.CTkFrame):
         marques_form = get_engin_designations_by_category('Tous')
         if hasattr(self, 'combo_marque_engin'):
             self.combo_marque_engin.configure(values=marques_form if marques_form else ['Aucune marque'], state='normal')
-            if marques_form:
-                self.combo_marque_engin.set(marques_form[0])
-            else:
-                self.combo_marque_engin.set('Aucune marque')
-        self.e_date.set('')
-        self._selected_piece_id = None
+        self.combo_unite.set('UNITE')
         self.btn_modif.configure(state='disabled')
         self.btn_add.configure(state='normal')
 
@@ -265,12 +269,12 @@ class PiecesFrame(ctk.CTkFrame):
             'engin_id': engin['id'] if engin else None,
             'famille_id': get_famille_id_by_name(famille),
             'date_livraison': self.e_date.get().strip() or None,
-            'quantite': int(self.e_qte.get().strip() or 0),
-            'seuil_alerte': int(self.e_seuil.get().strip() or 5),
+            'quantite': parse_qty(self.e_qte.get()),
+            'seuil_alerte': parse_qty(self.e_seuil.get().strip() or 5),
             'emplacement': self.e_emplacement.get().strip(),
             'unite': self.combo_unite.get().strip() or 'UNITE',
-            'ancien_prix_unitaire': float(self.e_ancien.get().strip() or 0),
-            'nouveau_prix_unitaire': float(self.e_nouveau.get().strip() or 0),
+            'ancien_prix_unitaire': float(self.e_ancien.get().strip().replace(',', '.') or 0),
+            'nouveau_prix_unitaire': float(self.e_nouveau.get().strip().replace(',', '.') or 0),
         }
         create_piece(data)
         self.refresh()
@@ -295,15 +299,15 @@ class PiecesFrame(ctk.CTkFrame):
                 'date_livraison': self.e_date.get().strip() or None,
                 'emplacement': self.e_emplacement.get().strip(),
                 'unite': self.combo_unite.get().strip() or 'UNITE',
-                'ancien_prix_unitaire': float(self.e_ancien.get().strip() or 0),
-                'nouveau_prix_unitaire': float(self.e_nouveau.get().strip() or 0),
+                'ancien_prix_unitaire': float(self.e_ancien.get().strip().replace(',', '.') or 0),
+                'nouveau_prix_unitaire': float(self.e_nouveau.get().strip().replace(',', '.') or 0),
             }
             try:
-                kwargs['quantite'] = int(self.e_qte.get().strip() or 0)
+                kwargs['quantite'] = parse_qty(self.e_qte.get())
             except ValueError:
                 pass
             try:
-                kwargs['seuil_alerte'] = int(self.e_seuil.get().strip() or 5)
+                kwargs['seuil_alerte'] = parse_qty(self.e_seuil.get())
             except ValueError:
                 pass
             if engin:
@@ -318,21 +322,16 @@ class PiecesFrame(ctk.CTkFrame):
 
     def delete_selected_piece(self):
         ref = self.e_ref.get().strip()
-        selected = self.tree.selection()
-        if not ref and selected:
-            values = self.tree.item(selected[0], 'values')
-            if values:
-                ref = values[0]
         if not ref:
-            messagebox.showwarning('Attention', 'Veuillez sélectionner une pièce à supprimer.')
+            messagebox.showwarning('Attention', 'Sélectionnez une pièce dans le tableau.')
             return
-
-        if messagebox.askyesno('Confirmation', f'Voulez-vous vraiment supprimer la pièce réf "{ref}" ?'):
-            if self._delete_piece_by_ref(ref):
-                self.clear_fields()
-                self.refresh()
+        if messagebox.askyesno('Confirmation', f'Supprimer définitivement la pièce "{ref}" ?'):
+            if self._selected_piece_id:
+                delete_piece(self._selected_piece_id)
             else:
-                messagebox.showerror('Erreur', f'Impossible de trouver la pièce réf "{ref}".')
+                self._delete_piece_by_ref(ref)
+            self.clear_fields()
+            self.refresh()
 
     def on_row_select(self, event):
         item = self.tree.selection()
@@ -342,11 +341,15 @@ class PiecesFrame(ctk.CTkFrame):
         if not values:
             return
         self.clear_fields()
+        ref = values[0]
         for piece in get_all_pieces():
-            if piece['reference_interne'] == values[0]:
+            if piece['reference_interne'] == ref:
                 self._selected_piece_id = piece['id']
-                self.e_ref.insert(0, piece.get('reference_interne', ''))
-                self.e_ref_f.insert(0, piece.get('reference_fournisseur', ''))
+                self.e_ref.delete(0, 'end')
+                self.e_ref.insert(0, piece['reference_interne'])
+                self.e_ref_f.delete(0, 'end')
+                self.e_ref_f.insert(0, piece.get('reference_fournisseur', '') or '')
+                self.e_designation.delete(0, 'end')
                 self.e_designation.insert(0, piece.get('designation', ''))
                 if piece.get('engin_categorie'):
                     cat_val = piece['engin_categorie']
@@ -359,8 +362,8 @@ class PiecesFrame(ctk.CTkFrame):
                 if piece.get('famille_nom'):
                     self.combo_famille.set(piece['famille_nom'])
                 self.e_date.set(str(piece.get('date_livraison', '') or ''))
-                self.e_qte.insert(0, str(piece.get('quantite', 0)))
-                self.e_seuil.insert(0, str(piece.get('seuil_alerte', 5)))
+                self.e_qte.insert(0, format_qty(piece.get('quantite', 0)))
+                self.e_seuil.insert(0, format_qty(piece.get('seuil_alerte', 5)))
                 self.e_emplacement.insert(0, piece.get('emplacement', ''))
                 if piece.get('unite'):
                     self.combo_unite.set(piece['unite'])
@@ -390,7 +393,7 @@ class PiecesFrame(ctk.CTkFrame):
             seuil = piece.get('seuil_alerte', 5)
             if seuil is None:
                 seuil = 5
-            is_critique = qte <= seuil
+            is_critique = float(qte) <= float(seuil)
 
             if only_critique and not is_critique:
                 continue
@@ -423,8 +426,8 @@ class PiecesFrame(ctk.CTkFrame):
                 piece.get('engin_categorie', '—'),
                 piece.get('engin_designation', '—'),
                 piece.get('famille_nom', ''),
-                qte,
-                seuil,
+                format_qty(qte),
+                format_qty(seuil),
                 format_money(piece.get('nouveau_prix_unitaire', 0)),
             ), tags=tags)
 

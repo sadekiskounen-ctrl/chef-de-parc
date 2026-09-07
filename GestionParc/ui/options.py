@@ -216,7 +216,7 @@ class OptionsFrame(ctk.CTkFrame):
             ('Version',          'v3.5 Enterprise'),
             ('Technologies',     'Python 3.10 / CustomTkinter / SQLite / ReportLab'),
             ('Base de données',  db_path),
-            ('Développé pour',   'SARL NOMADE AYRIS — Direction Technique & Parc'),
+            ('Développé pour',   'SARL NOMADE AYRIS — Chef de Parc Logistique'),
         ]
         for label, value in about_data:
             row = ctk.CTkFrame(about_card, fg_color=COLORS['bg_hover'], corner_radius=8)
