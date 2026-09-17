@@ -262,3 +262,17 @@ class MainWindow(ctk.CTk):
             except Exception:
                 pass
 
+        # ── Rafraîchissement inter-frames (cohérence du stock) ──────────────────
+        # Quand on quitte ou arrive sur un frame lié aux réceptions/sorties,
+        # rafraîchir aussi les autres frames déjà instanciés pour maintenir
+        # la cohérence des listes de pièces et des stocks.
+        STOCK_RELATED_FRAMES = {'bon_livraison', 'bon_sortie', 'pieces', 'dashboard'}
+        if key in STOCK_RELATED_FRAMES:
+            for other_key, other_frame in self._frames.items():
+                if other_key != key and other_key in STOCK_RELATED_FRAMES and other_key != 'options':
+                    if hasattr(other_frame, 'refresh'):
+                        try:
+                            other_frame.refresh()
+                        except Exception:
+                            pass
+

@@ -112,6 +112,14 @@ def initialize_database() -> None:
             pass
 
         cursor.execute('''
+            CREATE TABLE IF NOT EXISTS operateurs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nom TEXT UNIQUE NOT NULL,
+                date_creation DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        cursor.execute('''
             CREATE TABLE IF NOT EXISTS bons_livraison (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 numero_bon_livraison TEXT,
@@ -124,6 +132,7 @@ def initialize_database() -> None:
                 prix_total REAL NOT NULL DEFAULT 0,
                 date_livraison DATE,
                 chemin_pdf TEXT,
+                emplacement TEXT,
                 date_creation DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -148,6 +157,11 @@ def initialize_database() -> None:
         except sqlite3.OperationalError:
             pass
 
+        try:
+            cursor.execute('ALTER TABLE bons_livraison ADD COLUMN emplacement TEXT DEFAULT ""')
+        except sqlite3.OperationalError:
+            pass
+
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS bons_sortie (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -156,6 +170,9 @@ def initialize_database() -> None:
                 unite TEXT,
                 quantite INTEGER NOT NULL DEFAULT 0,
                 kilometrage TEXT DEFAULT '',
+                ordre_reparation TEXT DEFAULT '',
+                nom_operateur TEXT DEFAULT '',
+                date_sortie DATE,
                 date_heure DATETIME DEFAULT CURRENT_TIMESTAMP,
                 chemin_pdf TEXT,
                 utilisateur_id INTEGER,
@@ -175,9 +192,26 @@ def initialize_database() -> None:
         except sqlite3.OperationalError:
             pass
 
+        try:
+            cursor.execute('ALTER TABLE bons_sortie ADD COLUMN ordre_reparation TEXT DEFAULT ""')
+        except sqlite3.OperationalError:
+            pass
+
+        try:
+            cursor.execute('ALTER TABLE bons_sortie ADD COLUMN nom_operateur TEXT DEFAULT ""')
+        except sqlite3.OperationalError:
+            pass
+
+        try:
+            cursor.execute('ALTER TABLE bons_sortie ADD COLUMN date_sortie DATE')
+        except sqlite3.OperationalError:
+            pass
+
         families = ['CARROSSERIE', 'MOTEUR', 'TRANSMISSION', 'FREINAGE', 'ELECTRIQUE', 'SUSPENSION', 'LAVAGE']
         for name in families:
             cursor.execute('INSERT OR IGNORE INTO familles_pieces (nom) VALUES (?)', (name,))
+
+        cursor.execute('INSERT OR IGNORE INTO operateurs (nom) VALUES (?)', ('Benkerrou Tarek',))
 
         conn.commit()
     finally:
@@ -198,6 +232,36 @@ def get_famille_id_by_name(name: str) -> int | None:
         row = cursor.fetchone()
     conn.close()
     return row['id'] if row else None
+
+
+def get_all_operateurs() -> list[str]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT nom FROM operateurs ORDER BY nom ASC')
+    rows = [r['nom'].strip() for r in cursor.fetchall() if r['nom'] and r['nom'].strip()]
+    try:
+        cursor.execute('SELECT DISTINCT nom_operateur FROM bons_sortie WHERE nom_operateur IS NOT NULL AND TRIM(nom_operateur) != ""')
+        for r in cursor.fetchall():
+            n = r['nom_operateur'].strip()
+            if n and n not in rows:
+                rows.append(n)
+    except Exception:
+        pass
+    conn.close()
+    if not rows:
+        rows = ['Benkerrou Tarek']
+    return sorted(list(set(rows)))
+
+
+def save_operateur(nom: str) -> None:
+    nom = (nom or '').strip()
+    if not nom:
+        return
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('INSERT OR IGNORE INTO operateurs (nom) VALUES (?)', (nom,))
+    conn.commit()
+    conn.close()
 
 
 def get_all_engins() -> list[dict]:
@@ -225,10 +289,28 @@ def get_all_pieces() -> list[dict]:
 
 
 def get_piece_by_reference(reference: str) -> dict | None:
+    if not reference or not str(reference).strip():
+        return None
+    ref_clean = str(reference).strip()
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM pieces WHERE reference_interne = ?', (reference,))
+    cursor.execute('SELECT * FROM pieces WHERE LOWER(TRIM(reference_interne)) = LOWER(TRIM(?))', (ref_clean,))
     row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_piece_by_designation(designation: str) -> dict | None:
+    if not designation or not str(designation).strip():
+        return None
+    desig_clean = str(designation).strip()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM pieces WHERE LOWER(TRIM(designation)) = LOWER(TRIM(?))', (desig_clean,))
+    row = cursor.fetchone()
+    if not row:
+        cursor.execute('SELECT * FROM pieces WHERE LOWER(designation) LIKE ?', (f"%{desig_clean.lower()}%",))
+        row = cursor.fetchone()
     conn.close()
     return dict(row) if row else None
 
@@ -245,7 +327,7 @@ def get_piece_by_id(piece_id: int) -> dict | None:
 def get_engin_by_code(code: str) -> dict | None:
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM engins WHERE code_engin = ?', (code.strip(),))
+    cursor.execute('SELECT * FROM engins WHERE LOWER(TRIM(code_engin)) = LOWER(TRIM(?))', (code.strip(),))
     row = cursor.fetchone()
     conn.close()
     return dict(row) if row else None
@@ -284,29 +366,61 @@ def update_engin(engin_id: int, **kwargs) -> None:
 def delete_engin(engin_id: int) -> None:
     conn = get_connection()
     cursor = conn.cursor()
+    cursor.execute('DELETE FROM pieces WHERE engin_id = ?', (engin_id,))
     cursor.execute('DELETE FROM engins WHERE id = ?', (engin_id,))
     conn.commit()
     conn.close()
 
 
 def create_piece(data: dict) -> dict:
+    ref = (data.get('reference_interne') or '').strip()
+    if not ref:
+        raise ValueError("La référence interne est obligatoire.")
+
+    existing = get_piece_by_reference(ref)
+    if existing:
+        # Mettre à jour la pièce existante et cumuler la quantité
+        old_qty = _clean_qty_num(existing.get('quantite', 0))
+        add_qty = _clean_qty_num(data.get('quantite', 0))
+        new_qty = _clean_qty_num(old_qty + add_qty)
+        pu = float(data.get('nouveau_prix_unitaire') or existing.get('nouveau_prix_unitaire') or 0)
+        old_pu = float(existing.get('nouveau_prix_unitaire') or existing.get('ancien_prix_unitaire') or 0)
+        update_data = {
+            'reference_fournisseur': (data.get('reference_fournisseur') or existing.get('reference_fournisseur') or '').strip(),
+            'designation': (data.get('designation') or existing.get('designation') or ref).strip(),
+            'engin_id': data.get('engin_id') if data.get('engin_id') is not None else existing.get('engin_id'),
+            'famille_id': data.get('famille_id') if data.get('famille_id') is not None else existing.get('famille_id'),
+            'date_livraison': data.get('date_livraison') or existing.get('date_livraison'),
+            'quantite': new_qty,
+            'seuil_alerte': _clean_qty_num(data.get('seuil_alerte') if data.get('seuil_alerte') is not None else existing.get('seuil_alerte', 5)),
+            'emplacement': (data.get('emplacement') or existing.get('emplacement') or '').strip(),
+            'unite': data.get('unite') or existing.get('unite') or 'UNITE',
+            'ancien_prix_unitaire': old_pu,
+            'nouveau_prix_unitaire': pu,
+            'prix_total_nouveau': new_qty * pu
+        }
+        update_piece(existing['id'], **update_data)
+        return {'id': existing['id'], **update_data}
+
     conn = get_connection()
     cursor = conn.cursor()
+    qty = _clean_qty_num(data.get('quantite', 0))
+    pu = float(data.get('nouveau_prix_unitaire', 0) or 0)
     piece = {
-        'reference_interne': data.get('reference_interne', '').strip(),
-        'reference_fournisseur': data.get('reference_fournisseur', '').strip(),
-        'designation': data.get('designation', '').strip(),
+        'reference_interne': ref,
+        'reference_fournisseur': (data.get('reference_fournisseur') or '').strip(),
+        'designation': (data.get('designation') or ref).strip(),
         'engin_id': data.get('engin_id'),
         'famille_id': data.get('famille_id'),
         'date_livraison': data.get('date_livraison'),
-        'quantite': _clean_qty_num(data.get('quantite', 0)),
+        'quantite': qty,
         'seuil_alerte': _clean_qty_num(data.get('seuil_alerte', 5)),
-        'emplacement': data.get('emplacement', '').strip(),
+        'emplacement': (data.get('emplacement') or '').strip(),
         'unite': data.get('unite', 'UNITE'),
         'ancien_prix_unitaire': float(data.get('ancien_prix_unitaire', 0) or 0),
-        'nouveau_prix_unitaire': float(data.get('nouveau_prix_unitaire', 0) or 0),
+        'nouveau_prix_unitaire': pu,
+        'prix_total_nouveau': qty * pu
     }
-    piece['prix_total_nouveau'] = piece['nouveau_prix_unitaire'] * piece['quantite']
     cursor.execute(
         '''
         INSERT INTO pieces (
@@ -327,7 +441,6 @@ def create_piece(data: dict) -> dict:
     return {'id': piece_id, **piece}
 
 
-
 def update_piece(piece_id: int, **kwargs) -> None:
     fields = []
     values = []
@@ -341,6 +454,8 @@ def update_piece(piece_id: int, **kwargs) -> None:
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(f"UPDATE pieces SET {', '.join(fields)} WHERE id = ?", values)
+    # Recalculer prix_total_nouveau si quantite ou nouveau_prix_unitaire est mis à jour
+    cursor.execute('UPDATE pieces SET prix_total_nouveau = quantite * nouveau_prix_unitaire WHERE id = ?', (piece_id,))
     conn.commit()
     conn.close()
 
@@ -401,7 +516,8 @@ def create_bon_reception_multi(header: dict, articles: list[dict], chemin_pdf: s
     """
     Enregistre un bon de réception multi-articles :
     1. Insère chaque article dans bons_livraison
-    2. Met à jour le stock, l'unité et les prix (ancien / nouveau) de chaque pièce
+    2. Met à jour le stock, l'unité, l'emplacement et les prix (ancien / nouveau) de chaque pièce
+       (Crée automatiquement la pièce dans 'pieces' si elle n'existe pas encore)
     """
     num_bl = header.get('numero_bon_livraison', '').strip()
     nom_four = header.get('nom_fournisseur', '').strip()
@@ -412,10 +528,11 @@ def create_bon_reception_multi(header: dict, articles: list[dict], chemin_pdf: s
         cursor = conn.cursor()
         inserted_ids = []
         for art in articles:
-            ref_int = art.get('reference_interne', '').strip()
-            ref_four = art.get('reference_fournisseur', '').strip()
-            designation = art.get('designation', '').strip()
-            unite = art.get('unite', 'UNITE').strip() or 'UNITE'
+            ref_int = (art.get('reference_interne') or '').strip()
+            ref_four = (art.get('reference_fournisseur') or '').strip()
+            designation = (art.get('designation') or ref_int).strip()
+            unite = (art.get('unite') or 'UNITE').strip() or 'UNITE'
+            emplacement = (art.get('emplacement') or '').strip()
             qty = _clean_qty_num(art.get('quantite', 0))
             pu = float(art.get('prix_unitaire', 0) or 0)
             total = float(art.get('prix_total', 0) or (qty * pu))
@@ -425,17 +542,21 @@ def create_bon_reception_multi(header: dict, articles: list[dict], chemin_pdf: s
                 INSERT INTO bons_livraison (
                     numero_bon_livraison, nom_fournisseur, reference_interne,
                     reference_fournisseur, designation, unite, quantite, prix_unitaire,
-                    prix_total, date_livraison, chemin_pdf
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    prix_total, date_livraison, chemin_pdf, emplacement
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''',
-                (num_bl, nom_four, ref_int, ref_four, designation, unite, qty, pu, total, date_liv, chemin_pdf)
+                (num_bl, nom_four, ref_int, ref_four, designation, unite, qty, pu, total, date_liv, chemin_pdf, emplacement)
             )
             inserted_ids.append(cursor.lastrowid)
 
             # Mise à jour ou création de la pièce dans le stock
             if ref_int:
-                cursor.execute('SELECT id, quantite, nouveau_prix_unitaire FROM pieces WHERE reference_interne = ?', (ref_int,))
+                cursor.execute('SELECT id, quantite, nouveau_prix_unitaire, emplacement, designation, reference_fournisseur FROM pieces WHERE LOWER(TRIM(reference_interne)) = LOWER(TRIM(?))', (ref_int,))
                 p_row = cursor.fetchone()
+                if not p_row and designation:
+                    cursor.execute('SELECT id, quantite, nouveau_prix_unitaire, emplacement, designation, reference_fournisseur FROM pieces WHERE LOWER(TRIM(designation)) = LOWER(TRIM(?))', (designation,))
+                    p_row = cursor.fetchone()
+
                 if p_row:
                     # ── Pièce existante : incrémenter le stock ────────────────
                     old_qty = _clean_qty_num(p_row['quantite'] or 0)
@@ -447,15 +568,16 @@ def create_bon_reception_multi(header: dict, articles: list[dict], chemin_pdf: s
                         UPDATE pieces SET
                             quantite = ?,
                             unite = ?,
-                            reference_fournisseur = COALESCE(NULLIF(reference_fournisseur,''), ?),
+                            reference_fournisseur = CASE WHEN TRIM(COALESCE(reference_fournisseur,''))='' THEN ? ELSE reference_fournisseur END,
                             designation = CASE WHEN TRIM(COALESCE(designation,''))='' THEN ? ELSE designation END,
+                            emplacement = CASE WHEN TRIM(COALESCE(?, '')) != '' THEN ? ELSE emplacement END,
                             ancien_prix_unitaire = ?,
                             nouveau_prix_unitaire = ?,
                             prix_total_nouveau = ?,
                             date_livraison = ?
                         WHERE id = ?
                         ''',
-                        (new_qty, unite, ref_four, designation or ref_int, old_pu, pu, new_tot, date_liv, p_row['id'])
+                        (new_qty, unite, ref_four, designation, emplacement, emplacement, old_pu, pu, new_tot, date_liv, p_row['id'])
                     )
                 else:
                     # ── Pièce inconnue : la créer automatiquement dans le stock ─
@@ -464,11 +586,11 @@ def create_bon_reception_multi(header: dict, articles: list[dict], chemin_pdf: s
                         '''
                         INSERT INTO pieces (
                             reference_interne, reference_fournisseur, designation,
-                            quantite, unite, nouveau_prix_unitaire, ancien_prix_unitaire,
+                            quantite, seuil_alerte, emplacement, unite, nouveau_prix_unitaire, ancien_prix_unitaire,
                             prix_total_nouveau, date_livraison
-                        ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+                        ) VALUES (?, ?, ?, ?, 5, ?, ?, ?, 0, ?, ?)
                         ''',
-                        (ref_int, ref_four, designation or ref_int, qty, unite, pu, new_tot, date_liv)
+                        (ref_int, ref_four, designation, qty, emplacement, unite, pu, new_tot, date_liv)
                     )
 
         conn.commit()
@@ -503,6 +625,7 @@ def get_bons_reception_grouped() -> list[dict]:
             reference_fournisseur,
             designation,
             COALESCE(unite, 'UNITE') AS unite,
+            COALESCE(emplacement, '') AS emplacement,
             quantite,
             prix_unitaire,
             prix_total,
@@ -551,7 +674,7 @@ def get_bon_reception_details(numero_bon_livraison: str) -> list[dict]:
     cursor.execute(
         '''
         SELECT * FROM bons_livraison
-        WHERE numero_bon_livraison = ? OR ('BL-' || id) = ?
+        WHERE LOWER(TRIM(numero_bon_livraison)) = LOWER(TRIM(?)) OR ('BL-' || id) = ?
         ORDER BY id ASC
         ''',
         (num, num)
@@ -568,7 +691,7 @@ def update_bon_reception_chemin_pdf(numero_bon_livraison: str, chemin_pdf: str) 
     cursor.execute(
         '''
         UPDATE bons_livraison SET chemin_pdf = ?
-        WHERE numero_bon_livraison = ? OR ('BL-' || id) = ?
+        WHERE LOWER(TRIM(numero_bon_livraison)) = LOWER(TRIM(?)) OR ('BL-' || id) = ?
         ''',
         (chemin_pdf, num, num)
     )
@@ -577,7 +700,7 @@ def update_bon_reception_chemin_pdf(numero_bon_livraison: str, chemin_pdf: str) 
 
 
 def delete_bon_reception_by_num(numero_bon_livraison: str, revert_stock: bool = True) -> None:
-    """Supprime un bon de réception complet (toutes ses lignes) et réajuste éventuellement le stock."""
+    """Supprime un bon de réception complet (toutes ses lignes) et réajuste le stock des pièces."""
     conn = get_connection()
     try:
         cursor = conn.cursor()
@@ -585,7 +708,7 @@ def delete_bon_reception_by_num(numero_bon_livraison: str, revert_stock: bool = 
         cursor.execute(
             '''
             SELECT reference_interne, quantite FROM bons_livraison
-            WHERE numero_bon_livraison = ? OR ('BL-' || id) = ?
+            WHERE LOWER(TRIM(numero_bon_livraison)) = LOWER(TRIM(?)) OR ('BL-' || id) = ?
             ''',
             (num, num)
         )
@@ -596,12 +719,18 @@ def delete_bon_reception_by_num(numero_bon_livraison: str, revert_stock: bool = 
                 ref = row['reference_interne']
                 qty = _clean_qty_num(row['quantite'] or 0)
                 if ref and qty > 0:
-                    cursor.execute('UPDATE pieces SET quantite = MAX(0, quantite - ?) WHERE reference_interne = ?', (qty, ref))
+                    cursor.execute('SELECT id, quantite, nouveau_prix_unitaire FROM pieces WHERE LOWER(TRIM(reference_interne)) = LOWER(TRIM(?))', (ref,))
+                    p = cursor.fetchone()
+                    if p:
+                        cur_q = _clean_qty_num(p['quantite'] or 0)
+                        new_q = _clean_qty_num(max(0.0, cur_q - qty))
+                        pu = float(p['nouveau_prix_unitaire'] or 0)
+                        cursor.execute('UPDATE pieces SET quantite = ?, prix_total_nouveau = ? WHERE id = ?', (new_q, new_q * pu, p['id']))
 
         cursor.execute(
             '''
             DELETE FROM bons_livraison
-            WHERE numero_bon_livraison = ? OR ('BL-' || id) = ?
+            WHERE LOWER(TRIM(numero_bon_livraison)) = LOWER(TRIM(?)) OR ('BL-' || id) = ?
             ''',
             (num, num)
         )
@@ -631,7 +760,7 @@ def historique_prix_par_reference(reference: str) -> list[dict]:
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        'SELECT * FROM bons_livraison WHERE reference_interne = ? ORDER BY date_livraison ASC, id ASC',
+        'SELECT * FROM bons_livraison WHERE LOWER(TRIM(reference_interne)) = LOWER(TRIM(?)) ORDER BY date_livraison ASC, id ASC',
         (reference.strip(),)
     )
     rows = [dict(r) for r in cursor.fetchall()]
@@ -639,31 +768,78 @@ def historique_prix_par_reference(reference: str) -> list[dict]:
     return rows
 
 
-def create_bon_sortie(piece_id: int, engin_id: int, unite: str, quantite: int | float, utilisateur_id: int, kilometrage: str = '') -> dict:
+def get_bon_sortie_by_id(bon_id: int) -> dict | None:
     conn = get_connection()
     cursor = conn.cursor()
-    km = (kilometrage or '').strip()
-    qty = _clean_qty_num(quantite)
-    cursor.execute(
-        'INSERT INTO bons_sortie (piece_id, engin_id, unite, quantite, utilisateur_id, kilometrage) VALUES (?, ?, ?, ?, ?, ?)',
-        (piece_id, engin_id, unite, qty, utilisateur_id, km)
-    )
-    bon_id = cursor.lastrowid
-    conn.commit()
+    cursor.execute('SELECT * FROM bons_sortie WHERE id = ?', (bon_id,))
+    row = cursor.fetchone()
     conn.close()
-    return {'id': bon_id, 'piece_id': piece_id, 'engin_id': engin_id, 'unite': unite, 'quantite': qty, 'kilometrage': km}
+    return dict(row) if row else None
+
+
+def create_bon_sortie(piece_id: int, engin_id: int, unite: str, quantite: int | float, utilisateur_id: int, kilometrage: str = '', ordre_reparation: str = '', nom_operateur: str = '', date_sortie: str = '') -> dict:
+    """
+    Crée un bon de sortie ET déduit la quantité du stock dans une seule transaction atomique.
+    Lève ValueError si le stock est insuffisant.
+    """
+    km = (kilometrage or '').strip()
+    or_num = (ordre_reparation or '').strip()
+    op_nom = (nom_operateur or '').strip()
+    d_sortie = (date_sortie or datetime.now().strftime('%Y-%m-%d')).strip()
+    qty = _clean_qty_num(quantite)
+
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+
+        # ── Vérifier et déduire le stock en une seule transaction ─────────────
+        if piece_id:
+            cursor.execute('SELECT quantite, nouveau_prix_unitaire FROM pieces WHERE id = ?', (piece_id,))
+            p_row = cursor.fetchone()
+            if p_row:
+                cur_stock = _clean_qty_num(p_row['quantite'] or 0)
+                if float(cur_stock) < float(qty):
+                    raise ValueError(f"Stock insuffisant : disponible {cur_stock}, demandé {qty}")
+                new_stock = _clean_qty_num(max(0.0, float(cur_stock) - float(qty)))
+                pu = float(p_row['nouveau_prix_unitaire'] or 0)
+                cursor.execute(
+                    'UPDATE pieces SET quantite = ?, prix_total_nouveau = ? WHERE id = ?',
+                    (new_stock, new_stock * pu, piece_id)
+                )
+
+        # ── Insérer le bon de sortie ───────────────────────────────────────────
+        cursor.execute(
+            'INSERT INTO bons_sortie (piece_id, engin_id, unite, quantite, utilisateur_id, kilometrage, ordre_reparation, nom_operateur, date_sortie) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (piece_id, engin_id, unite, qty, utilisateur_id, km, or_num, op_nom, d_sortie)
+        )
+        bon_id = cursor.lastrowid
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    if op_nom:
+        save_operateur(op_nom)
+    return {
+        'id': bon_id, 'piece_id': piece_id, 'engin_id': engin_id, 'unite': unite,
+        'quantite': qty, 'kilometrage': km, 'ordre_reparation': or_num,
+        'nom_operateur': op_nom, 'date_sortie': d_sortie
+    }
 
 
 def get_all_bons_sortie() -> list[dict]:
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT bs.*, p.reference_interne, p.designation AS piece_designation, e.code_engin, e.designation AS engin_designation, e.matricule, u.username
+        SELECT bs.*, p.reference_interne, p.reference_fournisseur, p.designation AS piece_designation,
+               e.code_engin, e.designation AS engin_designation, e.matricule, u.username
         FROM bons_sortie bs
         LEFT JOIN pieces p ON bs.piece_id = p.id
         LEFT JOIN engins e ON bs.engin_id = e.id
         LEFT JOIN utilisateurs u ON bs.utilisateur_id = u.id
-        ORDER BY bs.date_heure DESC, bs.id DESC
+        ORDER BY COALESCE(NULLIF(bs.date_sortie, ''), bs.date_heure) DESC, bs.id DESC
     ''')
     rows = [dict(r) for r in cursor.fetchall()]
     conn.close()
@@ -677,129 +853,248 @@ def delete_bon_sortie(bon_id: int, restore_stock: bool = True) -> None:
         cursor.execute('SELECT piece_id, quantite FROM bons_sortie WHERE id = ?', (bon_id,))
         row = cursor.fetchone()
         if row and row['piece_id']:
-            qty = _clean_qty_num(row['quantite'])
-            cursor.execute('UPDATE pieces SET quantite = quantite + ? WHERE id = ?', (qty, row['piece_id']))
+            p = get_piece_by_id(row['piece_id'])
+            if p:
+                qty = _clean_qty_num(row['quantite'])
+                new_stock = _clean_qty_num(p.get('quantite', 0) + qty)
+                pu = float(p.get('nouveau_prix_unitaire', 0) or 0)
+                cursor.execute('UPDATE pieces SET quantite = ?, prix_total_nouveau = ? WHERE id = ?', (new_stock, new_stock * pu, row['piece_id']))
     cursor.execute('DELETE FROM bons_sortie WHERE id = ?', (bon_id,))
     conn.commit()
     conn.close()
 
 
-def update_bon_sortie(bon_id: int, piece_id: int, engin_id: int, unite: str, quantite: int | float, kilometrage: str = '') -> None:
+def update_bon_sortie(bon_id: int, piece_id: int, engin_id: int, unite: str, quantite: int | float, kilometrage: str = '', ordre_reparation: str = '', nom_operateur: str = '', date_sortie: str = '') -> None:
+    old_bon = get_bon_sortie_by_id(bon_id)
+    qty = _clean_qty_num(quantite)
+
+    if old_bon:
+        old_piece_id = old_bon.get('piece_id')
+        old_qty = _clean_qty_num(old_bon.get('quantite', 0))
+        if old_piece_id == piece_id:
+            diff = qty - old_qty
+            if diff != 0:
+                p = get_piece_by_id(piece_id)
+                if p:
+                    cur_stock = _clean_qty_num(p.get('quantite', 0))
+                    new_stock = _clean_qty_num(max(0.0, cur_stock - diff))
+                    pu = float(p.get('nouveau_prix_unitaire', 0) or 0)
+                    update_piece(piece_id, quantite=new_stock, prix_total_nouveau=new_stock * pu)
+        else:
+            # Pièce changée : réintégrer le stock de l'ancienne pièce, déduire de la nouvelle
+            if old_piece_id:
+                old_p = get_piece_by_id(old_piece_id)
+                if old_p:
+                    restored = _clean_qty_num(old_p.get('quantite', 0) + old_qty)
+                    pu_old = float(old_p.get('nouveau_prix_unitaire', 0) or 0)
+                    update_piece(old_piece_id, quantite=restored, prix_total_nouveau=restored * pu_old)
+            if piece_id:
+                new_p = get_piece_by_id(piece_id)
+                if new_p:
+                    deducted = _clean_qty_num(max(0.0, new_p.get('quantite', 0) - qty))
+                    pu_new = float(new_p.get('nouveau_prix_unitaire', 0) or 0)
+                    update_piece(piece_id, quantite=deducted, prix_total_nouveau=deducted * pu_new)
+
     conn = get_connection()
     cursor = conn.cursor()
     km = (kilometrage or '').strip()
-    qty = _clean_qty_num(quantite)
+    or_num = (ordre_reparation or '').strip()
+    op_nom = (nom_operateur or '').strip()
+    d_sortie = (date_sortie or datetime.now().strftime('%Y-%m-%d')).strip()
     cursor.execute(
-        'UPDATE bons_sortie SET piece_id = ?, engin_id = ?, unite = ?, quantite = ?, kilometrage = ? WHERE id = ?',
-        (piece_id, engin_id, unite, qty, km, bon_id)
+        'UPDATE bons_sortie SET piece_id = ?, engin_id = ?, unite = ?, quantite = ?, kilometrage = ?, ordre_reparation = ?, nom_operateur = ?, date_sortie = ? WHERE id = ?',
+        (piece_id, engin_id, unite, qty, km, or_num, op_nom, d_sortie, bon_id)
     )
     conn.commit()
     conn.close()
+    if op_nom:
+        save_operateur(op_nom)
 
 
 def update_bon_livraison(bon_id: int, data: dict) -> None:
-    qty = _clean_qty_num(data.get('quantite', 0) or 0)
+    """
+    Met à jour une ligne de bon de livraison ET recalcule le stock de la pièce correspondante.
+    Calcule le différentiel entre l'ancienne et la nouvelle quantité.
+    """
+    qty_new = _clean_qty_num(data.get('quantite', 0) or 0)
     unit = float(data.get('prix_unitaire', 0) or 0)
-    total = qty * unit
+    total = qty_new * unit
+    ref_int = data.get('reference_interne', '').strip()
+
     conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        '''UPDATE bons_livraison SET
-            numero_bon_livraison = ?, nom_fournisseur = ?, reference_interne = ?, reference_fournisseur = ?, designation = ?,
-            quantite = ?, prix_unitaire = ?, prix_total = ?, date_livraison = ?
-           WHERE id = ?''',
-        (
-            data.get('numero_bon_livraison', '').strip(),
-            data.get('nom_fournisseur', '').strip(),
-            data.get('reference_interne', '').strip(),
-            data.get('reference_fournisseur', '').strip(),
-            data.get('designation', '').strip(),
-            qty, unit, total,
-            data.get('date_livraison'),
-            bon_id
+    try:
+        cursor = conn.cursor()
+
+        # Récupérer l'ancienne quantité avant modification
+        cursor.execute('SELECT quantite, reference_interne FROM bons_livraison WHERE id = ?', (bon_id,))
+        old_row = cursor.fetchone()
+        qty_old = _clean_qty_num(old_row['quantite'] if old_row else 0)
+        old_ref = (old_row['reference_interne'] or '').strip() if old_row else ''
+
+        cursor.execute(
+            '''UPDATE bons_livraison SET
+                numero_bon_livraison = ?, nom_fournisseur = ?, reference_interne = ?, reference_fournisseur = ?, designation = ?,
+                quantite = ?, prix_unitaire = ?, prix_total = ?, date_livraison = ?
+               WHERE id = ?''',
+            (
+                data.get('numero_bon_livraison', '').strip(),
+                data.get('nom_fournisseur', '').strip(),
+                ref_int,
+                data.get('reference_fournisseur', '').strip(),
+                data.get('designation', '').strip(),
+                qty_new, unit, total,
+                data.get('date_livraison'),
+                bon_id
+            )
         )
-    )
-    conn.commit()
-    conn.close()
+
+        # ── Mise à jour du stock : appliquer le différentiel ──────────────────
+        diff = _clean_qty_num(qty_new - qty_old)
+        ref_for_stock = ref_int or old_ref
+        if ref_for_stock and diff != 0:
+            cursor.execute(
+                'SELECT id, quantite, nouveau_prix_unitaire FROM pieces WHERE LOWER(TRIM(reference_interne)) = LOWER(TRIM(?))',
+                (ref_for_stock,)
+            )
+            p = cursor.fetchone()
+            if p:
+                cur_q = _clean_qty_num(p['quantite'] or 0)
+                new_q = _clean_qty_num(max(0.0, float(cur_q) + float(diff)))
+                pu = float(p['nouveau_prix_unitaire'] or 0)
+                cursor.execute(
+                    'UPDATE pieces SET quantite = ?, prix_total_nouveau = ? WHERE id = ?',
+                    (new_q, new_q * pu, p['id'])
+                )
+
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def update_piece_stock_after_sortie(piece_id: int, quantite_sortie: int | float) -> None:
+    """Déduit la quantité sortie du stock disponible de la pièce."""
     piece = get_piece_by_id(piece_id)
     if not piece:
         return
     old_qty = _clean_qty_num(piece.get('quantite', 0))
     sortie_qty = _clean_qty_num(quantite_sortie)
     new_qty = _clean_qty_num(max(0.0, float(old_qty) - float(sortie_qty)))
-    update_piece(piece_id, quantite=new_qty)
+    pu = float(piece.get('nouveau_prix_unitaire', 0) or 0)
+    update_piece(piece_id, quantite=new_qty, prix_total_nouveau=new_qty * pu)
 
 
 def repair_stock_from_bons_reception() -> int:
     """
-    Parcourt tous les bons de réception et crée dans 'pieces' les articles
-    qui n'y sont pas encore enregistrés. Retourne le nombre de pièces créées.
+    Parcourt tous les bons de réception et :
+    1. Crée dans 'pieces' les articles qui n'y sont pas encore enregistrés
+    2. Recalcule le stock des pièces existantes (total réceptions - total sorties)
+    Retourne le nombre de pièces créées ou corrigées.
     Appelé au démarrage pour garantir la cohérence des données historiques.
     """
     conn = get_connection()
-    created = 0
+    affected = 0
     try:
         cursor = conn.cursor()
+
         # Récupérer toutes les lignes de bons_livraison
         cursor.execute('''
             SELECT reference_interne, reference_fournisseur, designation,
-                   unite, quantite, prix_unitaire, date_livraison
+                   unite, quantite, prix_unitaire, date_livraison, emplacement
             FROM bons_livraison
             WHERE TRIM(COALESCE(reference_interne,'')) != ''
             ORDER BY id ASC
         ''')
         rows = cursor.fetchall()
 
-        # Agréger les quantités par référence (somme de toutes les réceptions)
+        # Agréger les quantités de réception par référence
         agg = {}
         for r in rows:
             ref = (r['reference_interne'] or '').strip()
             if not ref:
                 continue
-            if ref not in agg:
-                agg[ref] = {
+            key = ref.lower()
+            if key not in agg:
+                agg[key] = {
+                    'reference_interne': ref,
                     'reference_fournisseur': (r['reference_fournisseur'] or '').strip(),
                     'designation': (r['designation'] or ref).strip(),
                     'unite': (r['unite'] or 'UNITE').strip() or 'UNITE',
+                    'emplacement': (r['emplacement'] or '').strip(),
                     'quantite': 0.0,
                     'prix_unitaire': float(r['prix_unitaire'] or 0),
                     'date_livraison': r['date_livraison'],
                 }
-            agg[ref]['quantite'] += float(r['quantite'] or 0)
-            # Garder le prix le plus récent et la date la plus récente
+            agg[key]['quantite'] += float(r['quantite'] or 0)
             if r['prix_unitaire']:
-                agg[ref]['prix_unitaire'] = float(r['prix_unitaire'])
+                agg[key]['prix_unitaire'] = float(r['prix_unitaire'])
             if r['date_livraison']:
-                agg[ref]['date_livraison'] = r['date_livraison']
+                agg[key]['date_livraison'] = r['date_livraison']
+            if r['emplacement']:
+                agg[key]['emplacement'] = r['emplacement']
 
-        for ref, data in agg.items():
-            cursor.execute('SELECT id, quantite FROM pieces WHERE reference_interne = ?', (ref,))
+        # Calculer le total des sorties par référence interne de pièce
+        cursor.execute('''
+            SELECT p.reference_interne, SUM(bs.quantite) as total_sortie
+            FROM bons_sortie bs
+            JOIN pieces p ON bs.piece_id = p.id
+            WHERE p.reference_interne IS NOT NULL AND TRIM(p.reference_interne) != ''
+            GROUP BY LOWER(TRIM(p.reference_interne))
+        ''')
+        sorties_map = {
+            (r['reference_interne'] or '').strip().lower(): float(r['total_sortie'] or 0)
+            for r in cursor.fetchall()
+        }
+
+        for key, data in agg.items():
+            ref = data['reference_interne']
+            total_rec = data['quantite']
+            total_sort = sorties_map.get(key, 0.0)
+            net_qty = _clean_qty_num(max(0.0, total_rec - total_sort))
+            pu = data['prix_unitaire']
+
+            cursor.execute(
+                'SELECT id, quantite, nouveau_prix_unitaire FROM pieces WHERE LOWER(TRIM(reference_interne)) = LOWER(TRIM(?))',
+                (ref,)
+            )
             existing = cursor.fetchone()
+
             if not existing:
-                # Créer la pièce manquante
-                qty = _clean_qty_num(data['quantite'])
-                pu = data['prix_unitaire']
+                # ── Pièce manquante : la créer avec le stock recalculé ─────────
                 cursor.execute(
                     '''
                     INSERT INTO pieces (
                         reference_interne, reference_fournisseur, designation,
-                        quantite, unite, nouveau_prix_unitaire, ancien_prix_unitaire,
+                        quantite, seuil_alerte, emplacement, unite, nouveau_prix_unitaire, ancien_prix_unitaire,
                         prix_total_nouveau, date_livraison
-                    ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+                    ) VALUES (?, ?, ?, ?, 5, ?, ?, ?, 0, ?, ?)
                     ''',
                     (
                         ref, data['reference_fournisseur'], data['designation'],
-                        qty, data['unite'], pu, qty * pu, data['date_livraison']
+                        net_qty, data['emplacement'], data['unite'], pu, net_qty * pu, data['date_livraison']
                     )
                 )
-                created += 1
+                affected += 1
+            else:
+                # ── Pièce existante : recalculer le stock si incohérent ────────
+                current_qty = _clean_qty_num(existing['quantite'] or 0)
+                # On recalcule seulement si la valeur stockée est manifestement
+                # incohérente (zéro alors qu'il y a eu des réceptions, ou négative)
+                if current_qty <= 0 and net_qty > 0:
+                    old_pu = float(existing['nouveau_prix_unitaire'] or pu)
+                    effective_pu = old_pu if old_pu > 0 else pu
+                    cursor.execute(
+                        'UPDATE pieces SET quantite = ?, prix_total_nouveau = ? WHERE id = ?',
+                        (net_qty, net_qty * effective_pu, existing['id'])
+                    )
+                    affected += 1
+
         conn.commit()
     finally:
         conn.close()
-    return created
+    return affected
 
 
 

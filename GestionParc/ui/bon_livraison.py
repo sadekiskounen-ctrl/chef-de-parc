@@ -9,7 +9,7 @@ from database.db_manager import (
     create_bon_reception_multi, get_bons_reception_grouped,
     get_bon_reception_details, delete_bon_reception_by_num,
     update_bon_reception_chemin_pdf, get_piece_by_reference,
-    get_all_pieces
+    get_piece_by_designation, get_all_pieces
 )
 from services.pdf_generator import generate_bon_reception_pdf
 from ui.pdf_viewer import ouvrir_pdf_viewer
@@ -69,44 +69,51 @@ class BonLivraisonFrame(ctk.CTkFrame):
         # Réf Interne
         ctk.CTkLabel(art_input_frame, text='Réf Interne', font=FONTS['small_bold'], text_color=COLORS['text_secondary']).grid(row=0, column=0, padx=3, sticky='w')
         piece_refs = [p['reference_interne'] for p in get_all_pieces()]
-        self.e_ref = make_combobox(art_input_frame, piece_refs if piece_refs else ['PI-001'], width=140)
+        self.e_ref = make_combobox(art_input_frame, piece_refs if piece_refs else ['PI-001'], width=130)
         self.e_ref.grid(row=1, column=0, padx=3, pady=(2, 0), sticky='w')
         self.e_ref.configure(command=self._on_piece_ref_changed)
+        self.e_ref._entry.bind('<KeyRelease>', self._on_ref_typed)
 
         # Réf Fournisseur
         ctk.CTkLabel(art_input_frame, text='Réf Fournisseur', font=FONTS['small_bold'], text_color=COLORS['text_secondary']).grid(row=0, column=1, padx=3, sticky='w')
-        self.e_four = make_input(art_input_frame, 'FR-001', 130)
+        self.e_four = make_input(art_input_frame, 'FR-001', 120)
         self.e_four.grid(row=1, column=1, padx=3, pady=(2, 0), sticky='w')
 
         # Désignation
         ctk.CTkLabel(art_input_frame, text='Désignation Pièce', font=FONTS['small_bold'], text_color=COLORS['text_secondary']).grid(row=0, column=2, padx=3, sticky='w')
-        self.e_designation = make_input(art_input_frame, 'Désignation', 190)
+        self.e_designation = make_input(art_input_frame, 'Désignation', 170)
         self.e_designation.grid(row=1, column=2, padx=3, pady=(2, 0), sticky='w')
+        self.e_designation.bind('<KeyRelease>', self._on_desig_typed)
+
+        # Emplacement
+        ctk.CTkLabel(art_input_frame, text='Emplacement', font=FONTS['small_bold'], text_color=COLORS['text_secondary']).grid(row=0, column=3, padx=3, sticky='w')
+        self.e_emplacement = make_input(art_input_frame, 'ex: Magasin A', 120)
+        self.e_emplacement.grid(row=1, column=3, padx=3, pady=(2, 0), sticky='w')
 
         # Unité
-        ctk.CTkLabel(art_input_frame, text='Unité', font=FONTS['small_bold'], text_color=COLORS['text_secondary']).grid(row=0, column=3, padx=3, sticky='w')
-        self.combo_unite = make_combobox(art_input_frame, UNITES, width=105)
+        ctk.CTkLabel(art_input_frame, text='Unité', font=FONTS['small_bold'], text_color=COLORS['text_secondary']).grid(row=0, column=4, padx=3, sticky='w')
+        self.combo_unite = make_combobox(art_input_frame, UNITES, width=95)
         self.combo_unite.set('UNITE')
-        self.combo_unite.grid(row=1, column=3, padx=3, pady=(2, 0), sticky='w')
+        self.combo_unite.grid(row=1, column=4, padx=3, pady=(2, 0), sticky='w')
 
         # Quantité (dynamique float / int)
-        ctk.CTkLabel(art_input_frame, text='Quantité', font=FONTS['small_bold'], text_color=COLORS['text_secondary']).grid(row=0, column=4, padx=3, sticky='w')
-        self.e_qte = make_input(art_input_frame, '1', 80)
-        self.e_qte.grid(row=1, column=4, padx=3, pady=(2, 0), sticky='w')
+        ctk.CTkLabel(art_input_frame, text='Quantité', font=FONTS['small_bold'], text_color=COLORS['text_secondary']).grid(row=0, column=5, padx=3, sticky='w')
+        self.e_qte = make_input(art_input_frame, '1', 75)
+        self.e_qte.grid(row=1, column=5, padx=3, pady=(2, 0), sticky='w')
 
         # Prix Unitaire
-        ctk.CTkLabel(art_input_frame, text='Prix Unit. (DZD)', font=FONTS['small_bold'], text_color=COLORS['text_secondary']).grid(row=0, column=5, padx=3, sticky='w')
-        self.e_prix = make_input(art_input_frame, '0.00', 105)
-        self.e_prix.grid(row=1, column=5, padx=3, pady=(2, 0), sticky='w')
+        ctk.CTkLabel(art_input_frame, text='Prix Unit. (DZD)', font=FONTS['small_bold'], text_color=COLORS['text_secondary']).grid(row=0, column=6, padx=3, sticky='w')
+        self.e_prix = make_input(art_input_frame, '0.00', 95)
+        self.e_prix.grid(row=1, column=6, padx=3, pady=(2, 0), sticky='w')
 
         # Boutons d'action pour l'article (Ajouter / Modifier / Annuler)
         btn_art_action_box = ctk.CTkFrame(art_input_frame, fg_color='transparent')
-        btn_art_action_box.grid(row=1, column=6, padx=(8, 2), pady=(2, 0), sticky='w')
+        btn_art_action_box.grid(row=1, column=7, padx=(6, 2), pady=(2, 0), sticky='w')
 
-        self.btn_add_art = make_primary_button(btn_art_action_box, '➕ Ajouter', self._add_or_update_article, width=110, height=36)
+        self.btn_add_art = make_primary_button(btn_art_action_box, '➕ Ajouter', self._add_or_update_article, width=105, height=36)
         self.btn_add_art.pack(side='left', padx=(0, 4))
 
-        self.btn_cancel_art = make_secondary_button(btn_art_action_box, '✖️ Annuler', self._cancel_article_edit, width=85, height=36)
+        self.btn_cancel_art = make_secondary_button(btn_art_action_box, '✖️ Annuler', self._cancel_article_edit, width=80, height=36)
         self.btn_cancel_art.pack(side='left')
         self.btn_cancel_art.configure(state='disabled')
 
@@ -124,26 +131,28 @@ class BonLivraisonFrame(ctk.CTkFrame):
 
         self.tree_current = ttk.Treeview(
             table_art_box,
-            columns=('idx', 'ref', 'four', 'desig', 'unite', 'qte', 'prix', 'total'),
+            columns=('idx', 'ref', 'four', 'desig', 'emplacement', 'unite', 'qte', 'prix', 'total'),
             show='headings', height=4
         )
         self.tree_current.heading('idx', text='N°')
         self.tree_current.heading('ref', text='Réf Interne')
         self.tree_current.heading('four', text='Réf Fournisseur')
         self.tree_current.heading('desig', text='Désignation')
+        self.tree_current.heading('emplacement', text='Emplacement')
         self.tree_current.heading('unite', text='Unité')
         self.tree_current.heading('qte', text='Qté')
         self.tree_current.heading('prix', text='Prix Unit.')
         self.tree_current.heading('total', text='Total Ligne')
 
         self.tree_current.column('idx', width=35, anchor='center', stretch=False)
-        self.tree_current.column('ref', width=110, anchor='center', stretch=True)
-        self.tree_current.column('four', width=110, anchor='center', stretch=True)
-        self.tree_current.column('desig', width=180, anchor='w', stretch=True)
-        self.tree_current.column('unite', width=75, anchor='center', stretch=False)
-        self.tree_current.column('qte', width=75, anchor='center', stretch=False)
-        self.tree_current.column('prix', width=110, anchor='center', stretch=True)
-        self.tree_current.column('total', width=120, anchor='center', stretch=True)
+        self.tree_current.column('ref', width=100, anchor='center', stretch=True)
+        self.tree_current.column('four', width=100, anchor='center', stretch=True)
+        self.tree_current.column('desig', width=170, anchor='w', stretch=True)
+        self.tree_current.column('emplacement', width=110, anchor='center', stretch=True)
+        self.tree_current.column('unite', width=70, anchor='center', stretch=False)
+        self.tree_current.column('qte', width=70, anchor='center', stretch=False)
+        self.tree_current.column('prix', width=105, anchor='center', stretch=True)
+        self.tree_current.column('total', width=115, anchor='center', stretch=True)
         self.tree_current.pack(fill='x', padx=8, pady=(2, 6))
 
         self.tree_current.bind('<ButtonRelease-1>', self._on_current_article_select)
@@ -255,10 +264,54 @@ class BonLivraisonFrame(ctk.CTkFrame):
                 if piece.get('designation'):
                     self.e_designation.delete(0, 'end')
                     self.e_designation.insert(0, piece['designation'])
+                if piece.get('emplacement'):
+                    self.e_emplacement.delete(0, 'end')
+                    self.e_emplacement.insert(0, piece['emplacement'])
                 if piece.get('unite'):
                     self.combo_unite.set(piece['unite'])
                 pu = piece.get('nouveau_prix_unitaire') or piece.get('ancien_prix_unitaire') or 0
                 if pu > 0:
+                    self.e_prix.delete(0, 'end')
+                    self.e_prix.insert(0, f"{pu:.2f}")
+
+    def _on_ref_typed(self, event=None):
+        ref = self.e_ref.get().strip()
+        if ref:
+            piece = get_piece_by_reference(ref)
+            if piece:
+                if piece.get('reference_fournisseur') and not self.e_four.get().strip():
+                    self.e_four.delete(0, 'end')
+                    self.e_four.insert(0, piece['reference_fournisseur'])
+                if piece.get('designation') and not self.e_designation.get().strip():
+                    self.e_designation.delete(0, 'end')
+                    self.e_designation.insert(0, piece['designation'])
+                if piece.get('emplacement') and not self.e_emplacement.get().strip():
+                    self.e_emplacement.delete(0, 'end')
+                    self.e_emplacement.insert(0, piece['emplacement'])
+                if piece.get('unite'):
+                    self.combo_unite.set(piece['unite'])
+                pu = piece.get('nouveau_prix_unitaire') or piece.get('ancien_prix_unitaire') or 0
+                if pu > 0 and (not self.e_prix.get().strip() or self.e_prix.get().strip() in ('0', '0.00', '0.0')):
+                    self.e_prix.delete(0, 'end')
+                    self.e_prix.insert(0, f"{pu:.2f}")
+
+    def _on_desig_typed(self, event=None):
+        desig = self.e_designation.get().strip()
+        if desig and len(desig) >= 2:
+            piece = get_piece_by_designation(desig)
+            if piece and (piece.get('designation', '').lower() == desig.lower() or piece.get('designation', '').lower().startswith(desig.lower())):
+                if piece.get('reference_interne') and (not self.e_ref.get().strip() or self.e_ref.get().strip() == 'PI-001'):
+                    self.e_ref.set(piece['reference_interne'])
+                if piece.get('reference_fournisseur') and not self.e_four.get().strip():
+                    self.e_four.delete(0, 'end')
+                    self.e_four.insert(0, piece['reference_fournisseur'])
+                if piece.get('emplacement') and not self.e_emplacement.get().strip():
+                    self.e_emplacement.delete(0, 'end')
+                    self.e_emplacement.insert(0, piece['emplacement'])
+                if piece.get('unite'):
+                    self.combo_unite.set(piece['unite'])
+                pu = piece.get('nouveau_prix_unitaire') or piece.get('ancien_prix_unitaire') or 0
+                if pu > 0 and (not self.e_prix.get().strip() or self.e_prix.get().strip() in ('0', '0.00', '0.0')):
                     self.e_prix.delete(0, 'end')
                     self.e_prix.insert(0, f"{pu:.2f}")
 
@@ -284,6 +337,9 @@ class BonLivraisonFrame(ctk.CTkFrame):
                 self.e_designation.delete(0, 'end')
                 self.e_designation.insert(0, art.get('designation', ''))
 
+                self.e_emplacement.delete(0, 'end')
+                self.e_emplacement.insert(0, art.get('emplacement', ''))
+
                 self.combo_unite.set(art.get('unite', 'UNITE'))
 
                 self.e_qte.delete(0, 'end')
@@ -308,6 +364,7 @@ class BonLivraisonFrame(ctk.CTkFrame):
         # Réinitialiser la ligne de saisie
         self.e_designation.delete(0, 'end')
         self.e_four.delete(0, 'end')
+        self.e_emplacement.delete(0, 'end')
         self.e_qte.delete(0, 'end')
         self.e_qte.insert(0, '1')
         self.e_prix.delete(0, 'end')
@@ -326,6 +383,7 @@ class BonLivraisonFrame(ctk.CTkFrame):
 
         ref_four = self.e_four.get().strip()
         designation = self.e_designation.get().strip()
+        emplacement = self.e_emplacement.get().strip()
         unite = self.combo_unite.get().strip() or 'UNITE'
 
         try:
@@ -349,6 +407,7 @@ class BonLivraisonFrame(ctk.CTkFrame):
             'reference_interne': ref_int,
             'reference_fournisseur': ref_four,
             'designation': designation,
+            'emplacement': emplacement,
             'unite': unite,
             'quantite': qty,
             'prix_unitaire': pu,
@@ -372,6 +431,7 @@ class BonLivraisonFrame(ctk.CTkFrame):
         # Vider la ligne d'article pour le suivant
         self.e_designation.delete(0, 'end')
         self.e_four.delete(0, 'end')
+        self.e_emplacement.delete(0, 'end')
         self.e_qte.delete(0, 'end')
         self.e_qte.insert(0, '1')
         self.e_prix.delete(0, 'end')
@@ -411,6 +471,7 @@ class BonLivraisonFrame(ctk.CTkFrame):
                 art.get('reference_interne', ''),
                 art.get('reference_fournisseur', '—'),
                 art.get('designation', ''),
+                art.get('emplacement') or '—',
                 art.get('unite', 'UNITE'),
                 format_qty(q),
                 format_money(art.get('prix_unitaire', 0)),
@@ -460,6 +521,7 @@ class BonLivraisonFrame(ctk.CTkFrame):
                 'reference_interne': art.get('reference_interne', ''),
                 'reference_fournisseur': art.get('reference_fournisseur', ''),
                 'designation': art.get('designation', ''),
+                'emplacement': art.get('emplacement', ''),
                 'unite': art.get('unite', 'UNITE') or 'UNITE',
                 'quantite': q,
                 'prix_unitaire': pu,
@@ -480,7 +542,6 @@ class BonLivraisonFrame(ctk.CTkFrame):
             return
 
         if not self._current_articles:
-            # Si aucun article dans la liste mais qu'une ligne est tapée dans les champs
             ref_int = self.e_ref.get().strip()
             if ref_int:
                 self._add_or_update_article()
@@ -557,7 +618,6 @@ class BonLivraisonFrame(ctk.CTkFrame):
         pdf_path = b.get('chemin_pdf')
 
         if not pdf_path or not os.path.exists(pdf_path):
-            # Régénérer le PDF
             articles = b.get('articles', [])
             if not articles:
                 articles = get_bon_reception_details(b['numero_bon_livraison'])
@@ -595,6 +655,7 @@ class BonLivraisonFrame(ctk.CTkFrame):
         self.e_nom_four.delete(0, 'end')
         self.e_four.delete(0, 'end')
         self.e_designation.delete(0, 'end')
+        self.e_emplacement.delete(0, 'end')
         self.combo_unite.set('UNITE')
         self.e_qte.delete(0, 'end')
         self.e_qte.insert(0, '1')
@@ -605,7 +666,6 @@ class BonLivraisonFrame(ctk.CTkFrame):
         self._on_history_unselect()
 
     def refresh(self):
-        # Mettre à jour la liste des pièces dans le combobox
         piece_refs = [p['reference_interne'] for p in get_all_pieces()]
         if hasattr(self, 'e_ref') and piece_refs:
             self.e_ref.configure(values=piece_refs)
@@ -620,13 +680,11 @@ class BonLivraisonFrame(ctk.CTkFrame):
         for bon in get_bons_reception_grouped():
             date_liv = bon.get('date_livraison', '') or ''
 
-            # Filtres dates
             if start_d and date_liv < start_d:
                 continue
             if end_d and date_liv > end_d:
                 continue
 
-            # Filtre texte
             if query:
                 num_bl = (bon.get('numero_bon_livraison') or '').lower()
                 nom_four = (bon.get('nom_fournisseur') or '').lower()
@@ -645,4 +703,3 @@ class BonLivraisonFrame(ctk.CTkFrame):
                 format_money(bon.get('montant_total', 0)),
                 pdf_indicator,
             ))
-

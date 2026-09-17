@@ -65,7 +65,8 @@ def _get_header_logo() -> Image | None:
 def _build_corporate_header(doc_type: str, num_doc: str, date_str: str,
                             beneficiaire: str = "", fournisseur: str = "",
                             code_engin: str = "", matricule: str = "",
-                            kilometrage: str = "", utilisateur: str = "") -> list:
+                            kilometrage: str = "", utilisateur: str = "",
+                            ordre_reparation: str = "") -> list:
     """
     En-tête PDF de standard international :
     - Bloc Identité Entreprise à gauche avec logo haute définition
@@ -159,6 +160,8 @@ def _build_corporate_header(doc_type: str, num_doc: str, date_str: str,
             f"<font color='#64748B'>Désignation : </font><b>{beneficiaire or '—'}</b><br/>"
             f"<font color='#64748B'>Matricule : </font><b>{matricule or '—'}</b>"
         )
+        if ordre_reparation:
+            card2_content += f"<br/><font color='#64748B'>N° Ordre Rép. : </font><b><font color='#1E3A8A'>{ordre_reparation}</font></b>"
         if kilometrage:
             card2_content += f"<br/><font color='#64748B'>Compteur : </font><b>{kilometrage}</b>"
     else:
@@ -293,17 +296,12 @@ def _draw_page_decorations(canvas, doc, num_doc: str):
     # Texte droite
     footer_right = f"Réf. {num_doc} • Édité le {now_str} • Page {doc.page}"
     canvas.setFont('Helvetica-Bold', 7.5)
-    canvas.setFillColor(COLOR_TEXT_DARK)
-    canvas.drawRightString(19.8 * cm, 0.9 * cm, footer_right)
-
-    canvas.restoreState()
-
-
-# ─────────────────── GÉNÉRATEUR BON DE SORTIE PDF ────────────────────────────
+   # ─────────────────── GÉNÉRATEUR BON DE SORTIE PDF ────────────────────────────
 
 def generate_bon_sortie_pdf(data: dict, output_path: str | None = None) -> str:
     """Génère un Bon de Sortie PDF officiel avec design d'entreprise de classe internationale."""
     now_str = datetime.now().strftime('%d/%m/%Y à %H:%M')
+    date_doc = str(data.get('date_sortie') or now_str)
     directory = Path(output_path) if output_path else Path(get_default_pdf_dir())
     directory.mkdir(parents=True, exist_ok=True)
 
@@ -320,15 +318,17 @@ def generate_bon_sortie_pdf(data: dict, output_path: str | None = None) -> str:
     )
 
     story = []
+    nom_op = data.get('nom_operateur') or data.get('utilisateur', '')
     story.extend(_build_corporate_header(
         "BON DE SORTIE DE MATÉRIEL",
         num_doc,
-        now_str,
+        date_doc,
         beneficiaire=data.get('designation_engin', ''),
         code_engin=data.get('code_engin', ''),
         matricule=data.get('matricule', ''),
         kilometrage=data.get('kilometrage', ''),
-        utilisateur=data.get('utilisateur', '')
+        utilisateur=nom_op,
+        ordre_reparation=data.get('ordre_reparation', '')
     ))
 
     # Tableau des détails de la sortie (Style Moderne sans surcharge de lignes verticales)
@@ -372,15 +372,15 @@ def generate_bon_sortie_pdf(data: dict, output_path: str | None = None) -> str:
         ('BOTTOMPADDING', (0, 0), (-1, 0),  7),
         ('GRID',          (0, 0), (-1, -1), 0.5, COLOR_BORDER),
         ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
-        ('LEFTPADDING',   (0, 0), (-1, -1), 5),
-        ('RIGHTPADDING',  (0, 0), (-1, -1), 5),
+        ('LEFTPADDING',   (0, 0), (-1, 0), 5),
+        ('RIGHTPADDING',  (0, 0), (-1, 0), 5),
         ('TOPPADDING',    (0, 1), (-1, -1), 8),
         ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
         ('BACKGROUND',    (0, 1), (-1, 1),  COLOR_WHITE),
     ]))
     story.append(table)
 
-    story.extend(_build_signatures_block('SORTIE', utilisateur=data.get('utilisateur', '')))
+    story.extend(_build_signatures_block('SORTIE', utilisateur=nom_op))
 
     doc.build(
         story,
@@ -394,7 +394,8 @@ def generate_bon_sortie_pdf(data: dict, output_path: str | None = None) -> str:
 
 def generate_bon_reception_pdf(data: dict, output_path: str | None = None) -> str:
     """
-    Génère un Bon de Réception / Livraison multi-articles officiel (Format A4 SAP / Entreprise).
+    Génère un Bon de Réception / Livraison multi-articles officiel (Format A4 SAP / Entreprise)
+    avec colonne Emplacement.
     """
     date_str = str(data.get('date_livraison') or datetime.now().strftime('%d/%m/%Y'))
     directory = Path(output_path) if output_path else Path(get_default_pdf_dir())
@@ -422,7 +423,7 @@ def generate_bon_reception_pdf(data: dict, output_path: str | None = None) -> st
         utilisateur=data.get('utilisateur', '')
     ))
 
-    # Tableau Multi-Articles
+    # Tableau Multi-Articles avec Emplacement
     col_hdr_style = ParagraphStyle('ch_br', fontName='Helvetica-Bold', fontSize=8, textColor=COLOR_WHITE, alignment=TA_CENTER)
     cell_style    = ParagraphStyle('c_br',  fontName='Helvetica', fontSize=8, textColor=COLOR_TEXT_DARK, leading=10)
     cell_bold_txt = ParagraphStyle('cb_br', fontName='Helvetica-Bold', fontSize=8, textColor=COLOR_TEXT_DARK, leading=10)
@@ -437,6 +438,7 @@ def generate_bon_reception_pdf(data: dict, output_path: str | None = None) -> st
             Paragraph('Réf. Interne', col_hdr_style),
             Paragraph('Réf. Fournisseur', col_hdr_style),
             Paragraph('Désignation Pièce / Article', col_hdr_style),
+            Paragraph('Emplacement', col_hdr_style),
             Paragraph('Unité', col_hdr_style),
             Paragraph('Qté', col_hdr_style),
             Paragraph('Prix Unit. (DZD)', col_hdr_style),
@@ -454,6 +456,7 @@ def generate_bon_reception_pdf(data: dict, output_path: str | None = None) -> st
             'reference_interne': data.get('reference_interne', '—'),
             'reference_fournisseur': data.get('reference_fournisseur', '—'),
             'designation': data.get('designation', '—'),
+            'emplacement': data.get('emplacement', '—'),
             'unite': data.get('unite', 'UNITE'),
             'quantite': data.get('quantite', 0),
             'prix_unitaire': data.get('prix_unitaire', 0),
@@ -469,6 +472,7 @@ def generate_bon_reception_pdf(data: dict, output_path: str | None = None) -> st
         pu = float(art.get('prix_unitaire', 0) or 0)
         tot = float(art.get('prix_total', 0) or (qte * pu))
         unite = str(art.get('unite', 'UNITE') or 'UNITE')
+        empl = str(art.get('emplacement') or '—')
         total_general += tot
         total_qte += qte
 
@@ -478,6 +482,7 @@ def generate_bon_reception_pdf(data: dict, output_path: str | None = None) -> st
             Paragraph(f"<b>{str(art.get('reference_interne', ''))}</b>", cell_bold_txt),
             Paragraph(str(art.get('reference_fournisseur', '—')), cell_style),
             Paragraph(f"<b>{str(art.get('designation', ''))}</b>", cell_bold_txt),
+            Paragraph(empl, cell_center),
             Paragraph(f"<b>{unite.upper()}</b>", cell_center),
             Paragraph(qte_display, cell_qty),
             Paragraph(f"{pu:,.2f}", cell_right),
@@ -493,14 +498,15 @@ def generate_bon_reception_pdf(data: dict, output_path: str | None = None) -> st
         Paragraph('<b>TOTAL GÉNÉRAL :</b>', tot_label_style),
         Paragraph('', cell_style),
         Paragraph('', cell_style),
-        Paragraph(f'<b>{len(articles)} article(s) enregistré(s)</b>', cell_style),
+        Paragraph(f'<b>{len(articles)} article(s)</b>', cell_style),
+        Paragraph('', cell_style),
         Paragraph('', cell_style),
         Paragraph(f'<b>{total_qte_display}</b>', cell_qty),
         Paragraph('', cell_style),
         Paragraph(f'<b>{total_general:,.2f} DZD</b>', tot_val_style),
     ])
 
-    col_widths = [0.9*cm, 2.4*cm, 2.4*cm, 4.8*cm, 1.5*cm, 1.6*cm, 2.5*cm, 2.5*cm]
+    col_widths = [0.8*cm, 2.2*cm, 2.0*cm, 4.2*cm, 2.0*cm, 1.4*cm, 1.5*cm, 2.2*cm, 2.3*cm]
     table = Table(table_data, colWidths=col_widths, repeatRows=1)
     
     t_style = [
