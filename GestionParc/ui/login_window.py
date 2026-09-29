@@ -130,6 +130,7 @@ class LoginWindow(ctk.CTk):
         user = authenticate(username, password)
         if user:
             self.authenticated = True
+            self.user_info = user
             self.destroy()
         else:
             self.lbl_error.configure(text='❌ Identifiants incorrects.')

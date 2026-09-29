@@ -5,7 +5,10 @@ from database.db_manager import (
     historique_prix_par_reference, get_piece_by_reference, get_all_pieces
 )
 from ui.theme import COLORS, FONTS, format_money
-from ui.widgets import make_input, make_primary_button, make_secondary_button, make_combobox, bind_tree_clear_selection
+from ui.widgets import (
+    make_input, make_primary_button, make_secondary_button,
+    bind_tree_clear_selection, AutocompleteEntry, show_toast
+)
 
 
 class PrixFrame(ctk.CTkFrame):
@@ -20,7 +23,7 @@ class PrixFrame(ctk.CTkFrame):
         self.header.grid(row=0, column=0, sticky='ew', padx=18, pady=(18, 8))
         ctk.CTkLabel(self.header, text='Comparateur & Marge de prix', font=FONTS['title_large'],
                      text_color=COLORS['text_primary']).pack(anchor='w')
-        ctk.CTkLabel(self.header, text='Analyse de l\'ancien prix, du nouveau prix et de la marge de variation',
+        ctk.CTkLabel(self.header, text='Analyse de l\'ancien prix, du nouveau prix et de la marge de variation avec alertes colorées',
                      font=FONTS['body'], text_color=COLORS['text_secondary']).pack(anchor='w')
 
         # ── Barre de recherche ────────────────────────────────────────────────
@@ -30,12 +33,10 @@ class PrixFrame(ctk.CTkFrame):
 
         ctk.CTkLabel(search, text='🔍 Référence interne :', font=FONTS['body_bold'],
                      text_color=COLORS['text_primary']).grid(row=0, column=0, padx=12, pady=12, sticky='w')
-        piece_refs = [p['reference_interne'] for p in get_all_pieces()]
-        self.e_ref = make_combobox(search, piece_refs if piece_refs else ['Aucune pièce'], width=220)
-        if piece_refs:
-            self.e_ref.set(piece_refs[0])
-        self.e_ref.configure(command=lambda choice: self.analyse_prix())
+        piece_refs = [p['reference_interne'] for p in get_all_pieces() if p.get('reference_interne')]
+        self.e_ref = AutocompleteEntry(search, placeholder='Rechercher réf...', width=220, completion_list=piece_refs, on_select=lambda c: self.analyse_prix())
         self.e_ref.grid(row=0, column=1, padx=8, pady=12, sticky='w')
+        self.e_ref.entry.bind('<KeyRelease>', lambda e: self.analyse_prix() if len(self.e_ref.get().strip()) >= 2 else None, add='+')
 
         make_primary_button(search, '🔍 Analyser', self.analyse_prix, width=130).grid(row=0, column=2, padx=8, pady=12, sticky='w')
         make_secondary_button(search, '📋 Tout afficher', self.show_all_pieces, width=160).grid(row=0, column=3, padx=8, pady=12, sticky='w')
@@ -156,9 +157,9 @@ class PrixFrame(ctk.CTkFrame):
     def show_all_pieces(self):
         """Affiche l'ensemble des pièces avec Ancien Prix, Nouveau Prix et Marge."""
         pieces = get_all_pieces()
-        piece_refs = [p['reference_interne'] for p in pieces]
-        if hasattr(self, 'e_ref') and piece_refs:
-            self.e_ref.configure(values=piece_refs)
+        piece_refs = [p['reference_interne'] for p in pieces if p.get('reference_interne')]
+        if hasattr(self, 'e_ref') and hasattr(self.e_ref, 'set_completion_list'):
+            self.e_ref.set_completion_list(piece_refs)
 
         self._clear_tree()
         if not pieces:

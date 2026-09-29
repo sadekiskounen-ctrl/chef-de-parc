@@ -299,15 +299,16 @@ def _draw_page_decorations(canvas, doc, num_doc: str):
    # ─────────────────── GÉNÉRATEUR BON DE SORTIE PDF ────────────────────────────
 
 def generate_bon_sortie_pdf(data: dict, output_path: str | None = None) -> str:
-    """Génère un Bon de Sortie PDF officiel avec design d'entreprise de classe internationale."""
+    """Génère un Bon de Sortie PDF officiel avec design d'entreprise de classe internationale (Support Multi-Articles)."""
     now_str = datetime.now().strftime('%d/%m/%Y à %H:%M')
     date_doc = str(data.get('date_sortie') or now_str)
     directory = Path(output_path) if output_path else Path(get_default_pdf_dir())
     directory.mkdir(parents=True, exist_ok=True)
 
-    bon_id = str(data.get('bon_id', '0001'))
+    bon_id = str(data.get('numero_bon_sortie') or data.get('bon_id', '0001')).strip()
     num_doc = f"BS-{bon_id}" if not str(bon_id).startswith('BS-') else str(bon_id)
-    filename = directory / f"BS_{bon_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+    clean_num = bon_id.replace('/', '_').replace('\\', '_')
+    filename = directory / f"BS_{clean_num}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
 
     doc = SimpleDocTemplate(
         str(filename), pagesize=A4,
@@ -336,7 +337,7 @@ def generate_bon_sortie_pdf(data: dict, output_path: str | None = None) -> str:
     cell_style    = ParagraphStyle('c_s',  fontName='Helvetica', fontSize=8, textColor=COLOR_TEXT_DARK, leading=10)
     cell_bold_txt = ParagraphStyle('cb_s', fontName='Helvetica-Bold', fontSize=8, textColor=COLOR_TEXT_DARK, leading=10)
     cell_center   = ParagraphStyle('cc_s', fontName='Helvetica', fontSize=8, textColor=COLOR_TEXT_DARK, alignment=TA_CENTER)
-    cell_qty      = ParagraphStyle('cq_s', fontName='Helvetica-Bold', fontSize=9, textColor=COLOR_ROYAL, alignment=TA_CENTER)
+    cell_qty      = ParagraphStyle('cq_s', fontName='Helvetica-Bold', fontSize=8.5, textColor=COLOR_ROYAL, alignment=TA_CENTER)
     cell_badge    = ParagraphStyle('cbdg', fontName='Helvetica-Bold', fontSize=7.5, textColor=COLOR_NAVY, alignment=TA_CENTER)
 
     table_data = [
@@ -349,35 +350,92 @@ def generate_bon_sortie_pdf(data: dict, output_path: str | None = None) -> str:
             Paragraph('Désignation Engin', col_hdr_style),
             Paragraph('Qté Sortie', col_hdr_style),
             Paragraph('Unité', col_hdr_style),
-        ],
-        [
-            Paragraph('1', cell_center),
-            Paragraph(f"<b>{str(data.get('reference_interne', '—'))}</b>", cell_bold_txt),
-            Paragraph(str(data.get('reference_fournisseur', '—')), cell_style),
-            Paragraph(f"<b>{str(data.get('designation_piece', data.get('designation', '—')))}</b>", cell_bold_txt),
-            Paragraph(f"<b>{str(data.get('code_engin', '—'))}</b>", cell_badge),
-            Paragraph(str(data.get('designation_engin', '—')), cell_style),
-            Paragraph(str(int(float(data.get('quantite', 1)))) if float(data.get('quantite', 1)).is_integer() else f"{float(data.get('quantite', 1)):.2f}".rstrip('0').rstrip('.'), cell_qty),
-            Paragraph(f"<b>{str(data.get('unite', 'UNITE')).upper()}</b>", cell_center),
         ]
     ]
 
+    raw_articles = data.get('articles')
+    if not raw_articles:
+        raw_articles = [{
+            'reference_interne': data.get('reference_interne', '—'),
+            'reference_fournisseur': data.get('reference_fournisseur', '—'),
+            'designation_piece': data.get('designation_piece', data.get('designation', '—')),
+            'code_engin': data.get('code_engin', '—'),
+            'designation_engin': data.get('designation_engin', '—'),
+            'quantite': data.get('quantite', 1),
+            'unite': data.get('unite', 'UNITE'),
+        }]
+
+    total_qte = 0.0
+    for idx, art in enumerate(raw_articles, 1):
+        q_val = art.get('quantite', 1)
+        try:
+            q_num = float(q_val)
+            total_qte += q_num
+            q_str = str(int(q_num)) if q_num.is_integer() else f"{q_num:.2f}".rstrip('0').rstrip('.')
+        except Exception:
+            q_str = str(q_val)
+
+        c_eng = str(art.get('code_engin') or data.get('code_engin', '—'))
+        d_eng = str(art.get('designation_engin') or art.get('engin_designation') or data.get('designation_engin', '—'))
+        r_int = str(art.get('reference_interne') or '—')
+        r_four = str(art.get('reference_fournisseur') or '—')
+        desig_p = str(art.get('piece_designation') or art.get('designation_piece') or art.get('designation') or '—')
+        unit_str = str(art.get('unite') or 'UNITE').upper()
+
+        table_data.append([
+            Paragraph(str(idx), cell_center),
+            Paragraph(f"<b>{r_int}</b>", cell_bold_txt),
+            Paragraph(r_four, cell_style),
+            Paragraph(f"<b>{desig_p}</b>", cell_bold_txt),
+            Paragraph(f"<b>{c_eng}</b>", cell_badge),
+            Paragraph(d_eng, cell_style),
+            Paragraph(q_str, cell_qty),
+            Paragraph(f"<b>{unit_str}</b>", cell_center),
+        ])
+
+    tot_q_str = str(int(total_qte)) if total_qte.is_integer() else f"{total_qte:.2f}".rstrip('0').rstrip('.')
+    table_data.append([
+        Paragraph(f'<b>TOTAL PIÈCES : {len(raw_articles)} article(s)</b>', ParagraphStyle('t_tot_lbl', fontName='Helvetica-Bold', fontSize=8, textColor=COLOR_NAVY, alignment=TA_RIGHT)),
+        Paragraph('', cell_style),
+        Paragraph('', cell_style),
+        Paragraph('', cell_style),
+        Paragraph('', cell_style),
+        Paragraph('', cell_style),
+        Paragraph(f'<b>{tot_q_str}</b>', ParagraphStyle('t_tot_q', fontName='Helvetica-Bold', fontSize=9, textColor=COLOR_ROYAL, alignment=TA_CENTER)),
+        Paragraph('', cell_style),
+    ])
+
     col_widths = [0.9*cm, 2.3*cm, 2.3*cm, 4.2*cm, 2.0*cm, 3.5*cm, 1.8*cm, 1.6*cm]
     table = Table(table_data, colWidths=col_widths, repeatRows=1)
-    table.setStyle(TableStyle([
+    
+    t_style = [
         ('BACKGROUND',    (0, 0), (-1, 0),  COLOR_PRIMARY),
         ('TEXTCOLOR',     (0, 0), (-1, 0),  COLOR_WHITE),
         ('ALIGN',         (0, 0), (-1, 0),  'CENTER'),
-        ('TOPPADDING',    (0, 0), (-1, 0),  7),
-        ('BOTTOMPADDING', (0, 0), (-1, 0),  7),
-        ('GRID',          (0, 0), (-1, -1), 0.5, COLOR_BORDER),
+        ('TOPPADDING',    (0, 0), (-1, 0),  6),
+        ('BOTTOMPADDING', (0, 0), (-1, 0),  6),
+        ('GRID',          (0, 0), (-1, -2), 0.5, COLOR_BORDER),
         ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
-        ('LEFTPADDING',   (0, 0), (-1, 0), 5),
-        ('RIGHTPADDING',  (0, 0), (-1, 0), 5),
-        ('TOPPADDING',    (0, 1), (-1, -1), 8),
-        ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
-        ('BACKGROUND',    (0, 1), (-1, 1),  COLOR_WHITE),
-    ]))
+        ('LEFTPADDING',   (0, 0), (-1, 0), 4),
+        ('RIGHTPADDING',  (0, 0), (-1, 0), 4),
+    ]
+    for r in range(1, len(raw_articles) + 1):
+        bg = COLOR_WHITE if r % 2 == 1 else COLOR_ROW_ALT
+        t_style.append(('BACKGROUND', (0, r), (-1, r), bg))
+        t_style.append(('TOPPADDING', (0, r), (-1, r), 5))
+        t_style.append(('BOTTOMPADDING', (0, r), (-1, r), 5))
+
+    tot_row_idx = len(raw_articles) + 1
+    t_style.extend([
+        ('SPAN',          (0, tot_row_idx), (5, tot_row_idx)),
+        ('BACKGROUND',    (0, tot_row_idx), (-1, tot_row_idx), COLOR_LIGHT_BG),
+        ('TOPPADDING',    (0, tot_row_idx), (-1, tot_row_idx), 7),
+        ('BOTTOMPADDING', (0, tot_row_idx), (-1, tot_row_idx), 7),
+        ('LINEABOVE',     (0, tot_row_idx), (-1, tot_row_idx), 1.2, COLOR_NAVY),
+        ('LINEBELOW',     (0, tot_row_idx), (-1, tot_row_idx), 1.2, COLOR_NAVY),
+    ])
+
+    table.setStyle(TableStyle(t_style))
     story.append(table)
 
     story.extend(_build_signatures_block('SORTIE', utilisateur=nom_op))

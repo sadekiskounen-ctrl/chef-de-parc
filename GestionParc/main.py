@@ -20,7 +20,8 @@ def main():
     login.mainloop()
     if not getattr(login, 'authenticated', False):
         return
-    app = MainWindow()
+    user_info = getattr(login, 'user_info', {'username': 'admin', 'role': 'admin'})
+    app = MainWindow(user_info=user_info)
     app.mainloop()
 
 

@@ -1,15 +1,19 @@
+import os
+from datetime import datetime
 import customtkinter as ctk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 
 from database.db_manager import (
     create_piece, delete_piece, update_piece,
     get_all_engins, get_all_pieces, get_engin_by_code, get_famille_id_by_name,
     get_engin_categories, get_engin_designations_by_category
 )
+from services.excel_export import export_pieces_xlsx
 from ui.theme import COLORS, FAMILLES_PIECES, FONTS, format_money, format_qty, parse_qty
 from ui.widgets import (
     make_input, make_primary_button, make_secondary_button, make_danger_button,
-    make_combobox, DatePickerWidget, bind_tree_clear_selection, MultiSelectCombobox
+    make_combobox, DatePickerWidget, bind_tree_clear_selection, MultiSelectCombobox,
+    AutocompleteEntry, show_toast
 )
 
 
@@ -20,6 +24,7 @@ class PiecesFrame(ctk.CTkFrame):
         self.form_fields = []
         self._selected_piece_id = None
         self._filter_critique_only = False
+        self._filtered_pieces = []
         self.build()
 
     def build(self):
@@ -34,44 +39,50 @@ class PiecesFrame(ctk.CTkFrame):
 
         # 1. Filtre Catégorie (Multi-Sélection)
         ctk.CTkLabel(filter_bar, text='🚜 Catégorie :', font=FONTS['body_bold'], text_color=COLORS['text_primary']).grid(row=0, column=0, padx=(12, 4), pady=12, sticky='w')
-        self.filter_categorie = MultiSelectCombobox(filter_bar, options=get_engin_categories(), width=170, command=self._on_category_changed)
+        self.filter_categorie = MultiSelectCombobox(filter_bar, options=get_engin_categories(), width=160, command=self._on_category_changed)
         self.filter_categorie.grid(row=0, column=1, padx=4, pady=12)
 
         # 2. Filtre Marque / Désignation engin (Dynamique)
-        ctk.CTkLabel(filter_bar, text='🏷️ Marque :', font=FONTS['body_bold'], text_color=COLORS['text_primary']).grid(row=0, column=2, padx=(12, 4), pady=12, sticky='w')
+        ctk.CTkLabel(filter_bar, text='🏷️ Marque :', font=FONTS['body_bold'], text_color=COLORS['text_primary']).grid(row=0, column=2, padx=(10, 4), pady=12, sticky='w')
         marques = ['Toutes'] + get_engin_designations_by_category('Tous')
-        self.filter_marque = make_combobox(filter_bar, marques, width=170)
+        self.filter_marque = make_combobox(filter_bar, marques, width=150)
         self.filter_marque.set('Toutes')
         self.filter_marque.grid(row=0, column=3, padx=4, pady=12)
 
         # 3. Filtre Famille
-        ctk.CTkLabel(filter_bar, text='📦 Famille :', font=FONTS['body_bold'], text_color=COLORS['text_primary']).grid(row=0, column=4, padx=(12, 4), pady=12, sticky='w')
-        self.filter_famille = make_combobox(filter_bar, ['Toutes'] + FAMILLES_PIECES, width=150)
+        ctk.CTkLabel(filter_bar, text='📦 Famille :', font=FONTS['body_bold'], text_color=COLORS['text_primary']).grid(row=0, column=4, padx=(10, 4), pady=12, sticky='w')
+        self.filter_famille = make_combobox(filter_bar, ['Toutes'] + FAMILLES_PIECES, width=140)
         self.filter_famille.set('Toutes')
         self.filter_famille.grid(row=0, column=5, padx=4, pady=12)
 
-        make_primary_button(filter_bar, '🔍 Filtrer', self.refresh, width=100).grid(row=0, column=6, padx=6, pady=12)
-        make_danger_button(filter_bar, '⚠️ Stock Critique', self.filter_stock_critique, width=140).grid(row=0, column=7, padx=4, pady=12)
-        make_secondary_button(filter_bar, '❌ Réinitialiser', self._reset_filters, width=120).grid(row=0, column=8, padx=6, pady=12)
+        make_primary_button(filter_bar, '🔍 Filtrer', self.refresh, width=95).grid(row=0, column=6, padx=4, pady=12)
+        make_danger_button(filter_bar, '⚠️ Critique', self.filter_stock_critique, width=110).grid(row=0, column=7, padx=4, pady=12)
+        make_secondary_button(filter_bar, '❌ Reset', self._reset_filters, width=90).grid(row=0, column=8, padx=4, pady=12)
+        make_secondary_button(filter_bar, '📊 Exporter Excel', self.export_to_excel, width=145).grid(row=0, column=9, padx=(4, 12), pady=12)
 
         # ── Formulaire ───────────────────────────────────────────────────────
         form = ctk.CTkFrame(self, fg_color=COLORS['bg_card'], corner_radius=16, border_width=1, border_color=COLORS['border'])
         form.grid(row=2, column=0, sticky='ew', padx=18, pady=(0, 12))
 
+        all_p = get_all_pieces()
+        p_refs = [p['reference_interne'] for p in all_p if p.get('reference_interne')]
+        p_des = [p['designation'] for p in all_p if p.get('designation')]
+        p_fours = [p['reference_fournisseur'] for p in all_p if p.get('reference_fournisseur')]
+
         # Ligne 1 : Références et Catégorie engin
-        ctk.CTkLabel(form, text='Référence interne', font=FONTS['body_bold'], text_color=COLORS['text_primary']).grid(row=0, column=0, padx=12, pady=(12, 4), sticky='w')
-        self.e_ref = make_input(form, 'PI-001', 180)
+        ctk.CTkLabel(form, text='🔍 Référence interne', font=FONTS['body_bold'], text_color=COLORS['text_primary']).grid(row=0, column=0, padx=12, pady=(12, 4), sticky='w')
+        self.e_ref = AutocompleteEntry(form, placeholder='PI-001', width=180, completion_list=p_refs)
         self.e_ref.grid(row=1, column=0, padx=12, pady=(0, 10), sticky='w')
         self.form_fields.append(self.e_ref)
 
         ctk.CTkLabel(form, text='Référence fournisseur', font=FONTS['body_bold'], text_color=COLORS['text_primary']).grid(row=0, column=1, padx=12, pady=(12, 4), sticky='w')
-        self.e_ref_f = make_input(form, 'FR-001', 180)
+        self.e_ref_f = AutocompleteEntry(form, placeholder='FR-001', width=180, completion_list=p_fours)
         self.e_ref_f.grid(row=1, column=1, padx=12, pady=(0, 10), sticky='w')
         self.form_fields.append(self.e_ref_f)
 
         # Désignation
         ctk.CTkLabel(form, text='Désignation', font=FONTS['body_bold'], text_color=COLORS['text_primary']).grid(row=0, column=2, padx=12, pady=(12, 4), sticky='w')
-        self.e_designation = make_input(form, 'Ex: Bougie moteur', 220)
+        self.e_designation = AutocompleteEntry(form, placeholder='Ex: Bougie moteur', width=220, completion_list=p_des)
         self.e_designation.grid(row=1, column=2, padx=12, pady=(0, 10), sticky='w')
         self.form_fields.append(self.e_designation)
 
@@ -232,7 +243,9 @@ class PiecesFrame(ctk.CTkFrame):
     def clear_fields(self):
         self._selected_piece_id = None
         for f in self.form_fields:
-            if isinstance(f, ctk.CTkEntry):
+            if isinstance(f, AutocompleteEntry):
+                f.set('')
+            elif isinstance(f, ctk.CTkEntry):
                 f.delete(0, 'end')
             elif isinstance(f, DatePickerWidget):
                 f.clear()
@@ -259,7 +272,7 @@ class PiecesFrame(ctk.CTkFrame):
         designation = self.e_designation.get().strip() or ref
         famille = self.combo_famille.get().strip()
         if not all([ref, famille]):
-            messagebox.showwarning('Attention', 'Référence interne et famille sont obligatoires.')
+            show_toast(self, 'Référence interne et famille sont obligatoires.', 'warning')
             return
         engin = self._get_selected_engin()
         data = {
@@ -277,18 +290,19 @@ class PiecesFrame(ctk.CTkFrame):
             'nouveau_prix_unitaire': float(self.e_nouveau.get().strip().replace(',', '.') or 0),
         }
         create_piece(data)
+        show_toast(self, f"Pièce '{ref}' enregistrée avec succès.", 'success')
         self.refresh()
         self.clear_fields()
 
     def update_selected_piece(self):
         if not self._selected_piece_id:
-            messagebox.showwarning('Attention', 'Sélectionnez une pièce à modifier.')
+            show_toast(self, 'Sélectionnez une pièce à modifier.', 'warning')
             return
         ref = self.e_ref.get().strip()
         designation = self.e_designation.get().strip() or ref
         famille = self.combo_famille.get().strip()
         if not ref:
-            messagebox.showwarning('Attention', 'La référence interne est obligatoire.')
+            show_toast(self, 'La référence interne est obligatoire.', 'warning')
             return
         engin = self._get_selected_engin()
         if messagebox.askyesno('Confirmation', f'Modifier la pièce "{ref}" ?'):
@@ -317,19 +331,21 @@ class PiecesFrame(ctk.CTkFrame):
                 if fid:
                     kwargs['famille_id'] = fid
             update_piece(self._selected_piece_id, **kwargs)
+            show_toast(self, f"Pièce '{ref}' mise à jour avec succès.", 'success')
             self.clear_fields()
             self.refresh()
 
     def delete_selected_piece(self):
         ref = self.e_ref.get().strip()
         if not ref:
-            messagebox.showwarning('Attention', 'Sélectionnez une pièce dans le tableau.')
+            show_toast(self, 'Sélectionnez une pièce dans le tableau.', 'warning')
             return
         if messagebox.askyesno('Confirmation', f'Supprimer définitivement la pièce "{ref}" ?'):
             if self._selected_piece_id:
                 delete_piece(self._selected_piece_id)
             else:
                 self._delete_piece_by_ref(ref)
+            show_toast(self, f"Pièce '{ref}' supprimée.", 'info')
             self.clear_fields()
             self.refresh()
 
@@ -345,12 +361,9 @@ class PiecesFrame(ctk.CTkFrame):
         for piece in get_all_pieces():
             if piece['reference_interne'] == ref:
                 self._selected_piece_id = piece['id']
-                self.e_ref.delete(0, 'end')
-                self.e_ref.insert(0, piece['reference_interne'])
-                self.e_ref_f.delete(0, 'end')
-                self.e_ref_f.insert(0, piece.get('reference_fournisseur', '') or '')
-                self.e_designation.delete(0, 'end')
-                self.e_designation.insert(0, piece.get('designation', ''))
+                self.e_ref.set(piece['reference_interne'])
+                self.e_ref_f.set(piece.get('reference_fournisseur', '') or '')
+                self.e_designation.set(piece.get('designation', ''))
                 if piece.get('engin_categorie'):
                     cat_val = piece['engin_categorie']
                     if cat_val.lower() == 'leger':
@@ -362,12 +375,17 @@ class PiecesFrame(ctk.CTkFrame):
                 if piece.get('famille_nom'):
                     self.combo_famille.set(piece['famille_nom'])
                 self.e_date.set(str(piece.get('date_livraison', '') or ''))
+                self.e_qte.delete(0, 'end')
                 self.e_qte.insert(0, format_qty(piece.get('quantite', 0)))
+                self.e_seuil.delete(0, 'end')
                 self.e_seuil.insert(0, format_qty(piece.get('seuil_alerte', 5)))
+                self.e_emplacement.delete(0, 'end')
                 self.e_emplacement.insert(0, piece.get('emplacement', ''))
                 if piece.get('unite'):
                     self.combo_unite.set(piece['unite'])
+                self.e_ancien.delete(0, 'end')
                 self.e_ancien.insert(0, str(piece.get('ancien_prix_unitaire', 0)))
+                self.e_nouveau.delete(0, 'end')
                 self.e_nouveau.insert(0, str(piece.get('nouveau_prix_unitaire', 0)))
                 break
         self.btn_modif.configure(state='normal')
@@ -387,6 +405,8 @@ class PiecesFrame(ctk.CTkFrame):
         filter_m = self.filter_marque.get().strip().lower() if hasattr(self, 'filter_marque') else 'toutes'
         filter_f = self.filter_famille.get().strip().lower() if hasattr(self, 'filter_famille') else 'toutes'
         only_critique = getattr(self, '_filter_critique_only', False)
+
+        self._filtered_pieces = []
 
         for piece in get_all_pieces():
             qte = piece.get('quantite', 0)
@@ -418,6 +438,8 @@ class PiecesFrame(ctk.CTkFrame):
                 if filter_f != fam_nom:
                     continue
 
+            self._filtered_pieces.append(piece)
+
             tags = ('critique',) if is_critique else ()
             self.tree.insert('', 'end', values=(
                 piece['reference_interne'],
@@ -430,6 +452,52 @@ class PiecesFrame(ctk.CTkFrame):
                 format_qty(seuil),
                 format_money(piece.get('nouveau_prix_unitaire', 0)),
             ), tags=tags)
+
+    def export_to_excel(self):
+        """Exporte les pièces filtrées actuellement affichées vers un fichier Excel."""
+        if not self._filtered_pieces:
+            show_toast(self, "Aucune pièce à exporter selon les filtres sélectionnés.", "warning")
+            return
+
+        filter_cats = [c for c in self.filter_categorie.get_selected()] if hasattr(self, 'filter_categorie') else ['Tous']
+        filter_m = self.filter_marque.get().strip() if hasattr(self, 'filter_marque') else 'Toutes'
+        filter_f = self.filter_famille.get().strip() if hasattr(self, 'filter_famille') else 'Toutes'
+        only_critique = getattr(self, '_filter_critique_only', False)
+
+        filters_desc = []
+        if 'Tous' not in filter_cats:
+            filters_desc.append(f"Catégories: {', '.join(filter_cats)}")
+        if filter_m not in ('Toutes', 'Tous', ''):
+            filters_desc.append(f"Marque: {filter_m}")
+        if filter_f not in ('Toutes', 'Tous', ''):
+            filters_desc.append(f"Famille: {filter_f}")
+        if only_critique:
+            filters_desc.append("Stock Critique (< Seuil)")
+
+        summary = ' | '.join(filters_desc) if filters_desc else "Toutes les pièces (sans filtre)"
+
+        default_filename = f"Inventaire_Pieces_AYRIS_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        chosen_path = filedialog.asksaveasfilename(
+            parent=self,
+            title="Exporter l'inventaire des pièces vers Excel",
+            defaultextension=".xlsx",
+            filetypes=[("Fichiers Excel (*.xlsx)", "*.xlsx"), ("Tous les fichiers", "*.*")],
+            initialfile=default_filename
+        )
+
+        if not chosen_path:
+            return
+
+        try:
+            saved_file = export_pieces_xlsx(self._filtered_pieces, output_path=chosen_path, filter_summary=summary)
+            show_toast(self, f"✅ Export réussi : {len(self._filtered_pieces)} pièces exportées !", "success")
+            if os.path.exists(saved_file):
+                try:
+                    os.startfile(saved_file)
+                except Exception:
+                    pass
+        except Exception as e:
+            messagebox.showerror("Erreur d'exportation", f"Impossible de générer le fichier Excel :\n{e}", parent=self)
 
     def _delete_piece_by_ref(self, ref):
         for piece in get_all_pieces():

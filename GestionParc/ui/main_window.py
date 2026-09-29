@@ -16,7 +16,7 @@ from ui.bon_livraison import BonLivraisonFrame
 from ui.bon_sortie import BonSortieFrame
 from ui.options import OptionsFrame
 from ui.theme import COLORS, FONTS, SIDEBAR_ITEMS
-from ui.widgets import make_primary_button, make_secondary_button
+from ui.widgets import make_primary_button, make_secondary_button, StatusBarWidget, show_toast
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 BASE_DIR = Path(getattr(sys, '_MEIPASS', ROOT_DIR))
@@ -74,9 +74,10 @@ class PasswordPromptDialog(ctk.CTkToplevel):
 
 
 class MainWindow(ctk.CTk):
-    def __init__(self):
+    def __init__(self, user_info: dict = None):
         super().__init__()
         self.title('SARL NOMADE Ayris — Gestionnaire de Parc')
+        self.user_info = user_info or {'username': 'Administrateur', 'role': 'admin'}
         
         # Adaptabilité dynamique selon l'écran et la résolution
         screen_w = self.winfo_screenwidth()
@@ -97,6 +98,7 @@ class MainWindow(ctk.CTk):
         self._frames = {}
         self._nav_buttons = {}
         self._build_ui()
+        self._setup_shortcuts()
         self.navigate_to('dashboard')
 
     def _setup_icon(self):
@@ -125,12 +127,44 @@ class MainWindow(ctk.CTk):
             except Exception:
                 pass
 
+    def _setup_shortcuts(self):
+        self.bind_all('<Control-n>', self._shortcut_new_bon)
+        self.bind_all('<Control-N>', self._shortcut_new_bon)
+        self.bind_all('<Control-f>', self._shortcut_search)
+        self.bind_all('<Control-F>', self._shortcut_search)
+
+    def _shortcut_new_bon(self, event=None):
+        if self._active_key == 'bon_sortie':
+            self.navigate_to('bon_livraison')
+        else:
+            self.navigate_to('bon_sortie' if self._active_key == 'bon_livraison' else 'bon_livraison')
+        show_toast(self, "Raccourci [Ctrl+N] : Formulaire de bon", "info")
+        return 'break'
+
+    def _shortcut_search(self, event=None):
+        target_frame = self._frames.get(self._active_key)
+        if target_frame:
+            # Chercher récursivement ou attribut direct de recherche
+            for attr in ['search_entry', 'e_recherche', 'search_input', 'e_filter', 'e_search']:
+                if hasattr(target_frame, attr):
+                    w = getattr(target_frame, attr)
+                    if hasattr(w, 'focus_set'):
+                        w.focus_set()
+                        if hasattr(w, 'select_range'):
+                            w.select_range(0, 'end')
+                        show_toast(self, "Recherche activée [Ctrl+F]", "info")
+                        return 'break'
+        show_toast(self, "Recherche [Ctrl+F]", "info")
+        return 'break'
+
     def _build_ui(self):
+        self.grid_columnconfigure(0, weight=0)
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=0)
 
         self.sidebar = ctk.CTkFrame(self, fg_color=COLORS['bg_sidebar'], corner_radius=0, width=250)
-        self.sidebar.grid(row=0, column=0, sticky='nsew')
+        self.sidebar.grid(row=0, column=0, rowspan=2, sticky='nsew')
         self.sidebar.grid_propagate(False)
 
         logo_frame = ctk.CTkFrame(self.sidebar, fg_color='transparent')
@@ -146,10 +180,10 @@ class MainWindow(ctk.CTk):
                 logo_img = ctk.CTkImage(
                     light_image=pil_img,
                     dark_image=pil_img,
-                    size=(170, 170)
+                    size=(160, 160)
                 )
-                logo_container = ctk.CTkFrame(logo_inner, fg_color='transparent', width=170, height=170)
-                logo_container.pack(pady=4, padx=10)
+                logo_container = ctk.CTkFrame(logo_inner, fg_color='transparent', width=160, height=160)
+                logo_container.pack(pady=2, padx=10)
                 logo_container.pack_propagate(False)
                 lbl_logo = ctk.CTkLabel(logo_container, image=logo_img, text='')
                 lbl_logo.pack(expand=True)
@@ -162,21 +196,37 @@ class MainWindow(ctk.CTk):
                 logo_img = ctk.CTkImage(
                     light_image=pil_img,
                     dark_image=pil_img,
-                    size=(192, 150)
+                    size=(180, 140)
                 )
                 lbl_logo = ctk.CTkLabel(logo_inner, image=logo_img, text='')
-                lbl_logo.pack(pady=4, padx=10)
+                lbl_logo.pack(pady=2, padx=10)
                 self._logo_images.append(logo_img)
             except Exception:
                 pass
 
-        ctk.CTkLabel(self.sidebar, text='SARL NOMADE AYRIS', font=('Segoe UI', 18, 'bold'), text_color='white').pack(pady=(0, 4))
-        ctk.CTkFrame(self.sidebar, fg_color='#1D5197', height=1, corner_radius=0).pack(fill='x', padx=20, pady=(4, 12))
+        ctk.CTkLabel(self.sidebar, text='SARL NOMADE AYRIS', font=('Segoe UI', 17, 'bold'), text_color='white').pack(pady=(0, 2))
+
+        # Badge de Rôle
+        is_admin = (self.user_info.get('role') == 'admin')
+        badge_bg = '#1E3A8A' if is_admin else '#065F46'
+        badge_text = f"👑 {self.user_info.get('username', 'Admin').upper()} (ADMIN)" if is_admin else f"👤 {self.user_info.get('username', 'Opérateur').upper()} (OPÉRATEUR)"
+        badge_color = '#FDE047' if is_admin else '#6EE7B7'
+
+        badge_box = ctk.CTkFrame(self.sidebar, fg_color=badge_bg, corner_radius=8, height=28)
+        badge_box.pack(fill='x', padx=18, pady=(4, 10))
+        badge_box.pack_propagate(False)
+        ctk.CTkLabel(badge_box, text=badge_text, font=FONTS['small_bold'], text_color=badge_color).pack(expand=True)
+
+        ctk.CTkFrame(self.sidebar, fg_color='#1D5197', height=1, corner_radius=0).pack(fill='x', padx=20, pady=(0, 10))
 
         nav_frame = ctk.CTkFrame(self.sidebar, fg_color='transparent')
         nav_frame.pack(fill='both', expand=True, padx=10, pady=(0, 12))
 
         for item in SIDEBAR_ITEMS:
+            # Si l'utilisateur est opérateur, masquer complètement le menu de configuration/options
+            if not is_admin and item['key'] == 'options':
+                continue
+
             btn = ctk.CTkButton(
                 nav_frame,
                 text=f"  {item['icon']}   {item['label']}",
@@ -208,9 +258,21 @@ class MainWindow(ctk.CTk):
             except Exception:
                 pass
 
+        # Barre de statut inférieure
+        self.status_bar = StatusBarWidget(
+            self,
+            user=self.user_info.get('username', 'Admin'),
+            role=self.user_info.get('role', 'admin')
+        )
+        self.status_bar.grid(row=1, column=1, sticky='ew')
+
     def navigate_to(self, key):
         # Sécurité : Vérification du mot de passe pour la page de configuration
         if key == 'options':
+            if self.user_info.get('role') != 'admin':
+                show_toast(self, "Accès réservé aux administrateurs", "error")
+                return
+
             expected_pwd = get_config('config_password', 'admin')
             dlg = PasswordPromptDialog(self)
             if dlg.result != expected_pwd:
@@ -262,10 +324,11 @@ class MainWindow(ctk.CTk):
             except Exception:
                 pass
 
+        if hasattr(self, 'status_bar'):
+            module_name = next((item['label'] for item in SIDEBAR_ITEMS if item['key'] == key), key)
+            self.status_bar.set_status(f"Module actif : {module_name}")
+
         # ── Rafraîchissement inter-frames (cohérence du stock) ──────────────────
-        # Quand on quitte ou arrive sur un frame lié aux réceptions/sorties,
-        # rafraîchir aussi les autres frames déjà instanciés pour maintenir
-        # la cohérence des listes de pièces et des stocks.
         STOCK_RELATED_FRAMES = {'bon_livraison', 'bon_sortie', 'pieces', 'dashboard'}
         if key in STOCK_RELATED_FRAMES:
             for other_key, other_frame in self._frames.items():

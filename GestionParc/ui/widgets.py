@@ -1,3 +1,4 @@
+import tkinter as tk
 import customtkinter as ctk
 
 from ui.theme import COLORS, FONTS
@@ -18,23 +19,385 @@ def make_card(parent, title: str = '', width: int = 200, height: int = 120):
     return frame
 
 
+class DynamicStatCard(ctk.CTkFrame):
+    """
+    Carte statistique dynamique avec adaptation intelligente de police
+    et défilement/marquee fluide pour afficher les grands nombres sans coupure.
+    """
+    def __init__(self, parent, title: str, value: str, icon: str, color: str, bg_color: str = None, **kwargs):
+        super().__init__(
+            parent,
+            fg_color=COLORS['bg_card'],
+            corner_radius=16,
+            border_width=1,
+            border_color=COLORS['border'],
+            **kwargs
+        )
+        self.original_value = str(value)
+        self.color = color
+        self.title_text = title
+        self._marquee_job = None
+        self._offset = 0
+        self._is_animating = False
+
+        icon_frame = ctk.CTkFrame(self, fg_color=bg_color or COLORS['bg_hover'], corner_radius=12, width=52, height=52)
+        icon_frame.pack(side='left', padx=12, pady=12)
+        icon_frame.pack_propagate(False)
+        ctk.CTkLabel(icon_frame, text=icon, font=('Segoe UI Emoji', 22), text_color=color).place(relx=0.5, rely=0.5, anchor='center')
+
+        self.text_frame = ctk.CTkFrame(self, fg_color='transparent')
+        self.text_frame.pack(side='left', padx=(0, 12), pady=10, fill='both', expand=True)
+
+        font_size = self._calc_font_size(self.original_value)
+        self.lbl_value = ctk.CTkLabel(
+            self.text_frame,
+            text=self.original_value,
+            font=('Segoe UI', font_size, 'bold'),
+            text_color=color,
+            anchor='w'
+        )
+        self.lbl_value.pack(anchor='w', fill='x', expand=True)
+
+        self.lbl_title = ctk.CTkLabel(
+            self.text_frame,
+            text=title,
+            font=FONTS['body_bold'],
+            text_color=COLORS['text_secondary'],
+            anchor='w'
+        )
+        self.lbl_title.pack(anchor='w', fill='x', expand=True)
+
+        # Liaison des événements pour défilement au survol ou automatique si très long
+        for widget in (self, self.text_frame, self.lbl_value, self.lbl_title, icon_frame):
+            widget.bind('<Enter>', self._start_marquee, add='+')
+            widget.bind('<Leave>', self._stop_marquee, add='+')
+
+        # Si le texte est très long (>15 caractères), déclencher un léger va-et-vient automatique
+        if len(self.original_value) > 15:
+            self.after(1500, self._start_marquee)
+
+    def _calc_font_size(self, text: str) -> int:
+        n = len(text)
+        if n <= 6:
+            return 24
+        elif n <= 10:
+            return 20
+        elif n <= 14:
+            return 17
+        elif n <= 18:
+            return 14
+        else:
+            return 12
+
+    def _start_marquee(self, event=None):
+        if not self._is_animating and len(self.original_value) > 12:
+            self._is_animating = True
+            self._scroll_step()
+
+    def _stop_marquee(self, event=None):
+        self._is_animating = False
+        if self._marquee_job:
+            self.after_cancel(self._marquee_job)
+            self._marquee_job = None
+        self._offset = 0
+        font_size = self._calc_font_size(self.original_value)
+        self.lbl_value.configure(text=self.original_value, font=('Segoe UI', font_size, 'bold'))
+
+    def _scroll_step(self):
+        if not self._is_animating:
+            return
+        try:
+            full = self.original_value + "    •    "
+            max_visible = 15
+            if len(self.original_value) > max_visible:
+                shifted = full[self._offset:] + full[:self._offset]
+                self.lbl_value.configure(text=shifted[:max_visible + 3])
+                self._offset = (self._offset + 1) % len(full)
+                self._marquee_job = self.after(300, self._scroll_step)
+            else:
+                self.lbl_value.configure(text=self.original_value)
+        except Exception:
+            pass
+
+    def update_value(self, value: str):
+        self.original_value = str(value)
+        font_size = self._calc_font_size(self.original_value)
+        self.lbl_value.configure(text=self.original_value, font=('Segoe UI', font_size, 'bold'))
+
+
 def make_stat_card(parent, title: str, value: str, icon: str, color: str, bg_color: str = None):
-    frame = ctk.CTkFrame(
-        parent,
-        fg_color=COLORS['bg_card'],
-        corner_radius=16,
-        border_width=1,
-        border_color=COLORS['border'],
-    )
-    icon_frame = ctk.CTkFrame(frame, fg_color=bg_color or COLORS['bg_hover'], corner_radius=12, width=54, height=54)
-    icon_frame.pack(side='left', padx=16, pady=16)
-    icon_frame.pack_propagate(False)
-    ctk.CTkLabel(icon_frame, text=icon, font=('Segoe UI Emoji', 24), text_color=color).place(relx=0.5, rely=0.5, anchor='center')
-    text_frame = ctk.CTkFrame(frame, fg_color='transparent')
-    text_frame.pack(side='left', padx=(0, 16), pady=16, fill='y', expand=True)
-    ctk.CTkLabel(text_frame, text=value, font=('Segoe UI', 25, 'bold'), text_color=color).pack(anchor='w')
-    ctk.CTkLabel(text_frame, text=title, font=FONTS['body_bold'], text_color=COLORS['text_secondary']).pack(anchor='w')
-    return frame
+    return DynamicStatCard(parent, title, value, icon, color, bg_color)
+
+
+class AutocompleteEntry(ctk.CTkFrame):
+    """
+    Champ de saisie moderne avec autocomplétion et menu déroulant instantané
+    qui s'affiche dès la frappe de la première lettre.
+    """
+    def __init__(self, parent, placeholder='', width=220, completion_list=None, on_select=None, textvariable=None, height=40):
+        super().__init__(parent, fg_color='transparent')
+        self._completion_list = [str(x) for x in (completion_list or [])]
+        self._on_select = on_select
+        self._popup = None
+        self._listbox = None
+        self._current_matches = []
+        self._after_job = None
+        self._width = width
+        self._height = height
+
+        self.entry = ctk.CTkEntry(
+            self,
+            placeholder_text=placeholder,
+            fg_color=COLORS['bg_input'],
+            border_color=COLORS['border'],
+            border_width=1,
+            text_color=COLORS['text_primary'],
+            placeholder_text_color=COLORS['text_muted'],
+            font=FONTS['body'],
+            corner_radius=8,
+            height=height,
+            width=width,
+            textvariable=textvariable,
+        )
+        self.entry.pack(fill='both', expand=True)
+
+        self.entry.bind('<KeyRelease>', self._on_key_release)
+        self.entry.bind('<FocusOut>', self._on_focus_out)
+        self.entry.bind('<Down>', self._on_arrow_down)
+        self.entry.bind('<Up>', self._on_arrow_up)
+        self.entry.bind('<Return>', self._on_return)
+        self.entry.bind('<Escape>', lambda e: self._close_popup())
+        self.entry.bind('<Tab>', lambda event: _focus_next_widget(event.widget))
+        self.entry.bind('<Shift-Tab>', lambda event: _focus_prev_widget(event.widget))
+
+    def set_completion_list(self, new_list: list[str]):
+        self._completion_list = [str(x) for x in (new_list or [])]
+
+    def _on_key_release(self, event):
+        if event.keysym in ('Up', 'Down', 'Return', 'Escape', 'Tab', 'Shift_L', 'Shift_R', 'Control_L', 'Control_R', 'Alt_L', 'Alt_R'):
+            return
+        
+        if self._after_job:
+            self.after_cancel(self._after_job)
+        self._after_job = self.after(100, self._filter_and_show_popup)
+
+    def _filter_and_show_popup(self):
+        query = self.entry.get().strip().lower()
+        if not query or len(query) < 1:
+            self._close_popup()
+            return
+
+        # Priorité aux correspondances au début, puis dans le texte
+        starts = [item for item in self._completion_list if item and item.lower().startswith(query)]
+        contains = [item for item in self._completion_list if item and query in item.lower() and item not in starts]
+        self._current_matches = (starts + contains)[:10]
+
+        if not self._current_matches:
+            self._close_popup()
+            return
+
+        self._show_popup()
+
+    def _show_popup(self):
+        if not self._current_matches:
+            return
+
+        top_win = self.winfo_toplevel()
+
+        if self._popup is None or not self._popup.winfo_exists():
+            self._popup = tk.Toplevel(top_win)
+            self._popup.wm_overrideredirect(True)
+            self._popup.attributes('-topmost', True)
+            self._popup.configure(bg='#FFFFFF')
+
+            frame = tk.Frame(self._popup, bg='#FFFFFF', highlightthickness=1, highlightbackground='#004899')
+            frame.pack(fill='both', expand=True)
+
+            self._listbox = tk.Listbox(
+                frame,
+                font=('Segoe UI', 11),
+                bg='#FFFFFF',
+                fg='#0F172A',
+                selectbackground='#004899',
+                selectforeground='#FFFFFF',
+                activestyle='none',
+                bd=0,
+                highlightthickness=0,
+                height=min(8, len(self._current_matches))
+            )
+            self._listbox.pack(fill='both', expand=True, padx=2, pady=2)
+            self._listbox.bind('<ButtonRelease-1>', self._on_listbox_click)
+            self._listbox.bind('<Return>', self._on_return)
+
+        self._listbox.delete(0, 'end')
+        for item in self._current_matches:
+            self._listbox.insert('end', f"  {item}")
+
+        self._listbox.configure(height=min(8, len(self._current_matches)))
+
+        try:
+            self.update_idletasks()
+            rx = self.entry.winfo_rootx()
+            ry = self.entry.winfo_rooty() + self.entry.winfo_height() + 2
+            rw = max(self.entry.winfo_width(), self._width)
+            rh = min(8, len(self._current_matches)) * 24 + 8
+            self._popup.geometry(f"{rw}x{rh}+{rx}+{ry}")
+            self._popup.deiconify()
+        except Exception:
+            pass
+
+    def _close_popup(self):
+        if self._popup and self._popup.winfo_exists():
+            self._popup.destroy()
+        self._popup = None
+        self._listbox = None
+
+    def _on_focus_out(self, event=None):
+        # Délai pour permettre le clic sur la listbox
+        self.after(200, self._close_popup)
+
+    def _on_arrow_down(self, event):
+        if self._popup and self._popup.winfo_exists() and self._listbox:
+            curr = self._listbox.curselection()
+            next_idx = (curr[0] + 1) if curr else 0
+            if next_idx < self._listbox.size():
+                self._listbox.selection_clear(0, 'end')
+                self._listbox.selection_set(next_idx)
+                self._listbox.see(next_idx)
+            return 'break'
+
+    def _on_arrow_up(self, event):
+        if self._popup and self._popup.winfo_exists() and self._listbox:
+            curr = self._listbox.curselection()
+            prev_idx = (curr[0] - 1) if curr else (self._listbox.size() - 1)
+            if prev_idx >= 0:
+                self._listbox.selection_clear(0, 'end')
+                self._listbox.selection_set(prev_idx)
+                self._listbox.see(prev_idx)
+            return 'break'
+
+    def _on_return(self, event=None):
+        if self._popup and self._popup.winfo_exists() and self._listbox:
+            sel = self._listbox.curselection()
+            if sel and 0 <= sel[0] < len(self._current_matches):
+                chosen = self._current_matches[sel[0]]
+                self._select_item(chosen)
+                return 'break'
+        self._close_popup()
+
+    def _on_listbox_click(self, event=None):
+        if self._listbox:
+            sel = self._listbox.curselection()
+            if sel and 0 <= sel[0] < len(self._current_matches):
+                chosen = self._current_matches[sel[0]]
+                self._select_item(chosen)
+
+    def _select_item(self, text: str):
+        self.entry.delete(0, 'end')
+        self.entry.insert(0, text)
+        self._close_popup()
+        if self._on_select:
+            try:
+                self._on_select(text)
+            except Exception:
+                pass
+
+    def get(self) -> str:
+        return self.entry.get().strip()
+
+    def set(self, text: str):
+        self.entry.delete(0, 'end')
+        if text:
+            self.entry.insert(0, str(text))
+
+    def delete(self, first, last=None):
+        self.entry.delete(first, last)
+
+    def insert(self, index, string):
+        self.entry.insert(index, string)
+
+    def configure(self, **kwargs):
+        if 'placeholder_text' in kwargs:
+            self.entry.configure(placeholder_text=kwargs.pop('placeholder_text'))
+        if 'state' in kwargs:
+            self.entry.configure(state=kwargs.pop('state'))
+        if 'command' in kwargs:
+            self._on_select = kwargs.pop('command')
+        super().configure(**kwargs)
+
+
+def make_autocomplete_entry(parent, values: list[str], placeholder='', width=220, on_select=None):
+    return AutocompleteEntry(parent, placeholder=placeholder, width=width, completion_list=values, on_select=on_select)
+
+
+def show_toast(parent, message: str, toast_type: str = 'success', duration: int = 2600):
+    """
+    Affiche une notification toast discrète, animée et non bloquante.
+    """
+    try:
+        top = parent.winfo_toplevel()
+        toast = ctk.CTkFrame(
+            top,
+            fg_color='#059669' if toast_type == 'success' else ('#004899' if toast_type == 'info' else ('#D97706' if toast_type == 'warning' else '#DC2626')),
+            corner_radius=10,
+            border_width=0
+        )
+        icon = '✅ ' if toast_type == 'success' else ('ℹ️ ' if toast_type == 'info' else ('⚠️ ' if toast_type == 'warning' else '❌ '))
+        lbl = ctk.CTkLabel(
+            toast,
+            text=f"{icon}{message}",
+            font=FONTS['body_bold'],
+            text_color='white',
+            padx=16,
+            pady=10
+        )
+        lbl.pack()
+
+        toast.place(relx=0.98, rely=0.04, anchor='ne')
+        toast.tkraise()
+
+        def _dismiss():
+            try:
+                toast.destroy()
+            except Exception:
+                pass
+
+        top.after(duration, _dismiss)
+    except Exception:
+        pass
+
+
+class StatusBarWidget(ctk.CTkFrame):
+    """
+    Barre de statut discrète en bas de la fenêtre principale.
+    """
+    def __init__(self, parent, user: str = 'Admin', role: str = 'admin'):
+        super().__init__(parent, fg_color=COLORS['bg_card'], height=28, corner_radius=0, border_width=1, border_color=COLORS['border'])
+        self.pack_propagate(False)
+
+        # Gauche : Statut opérationnel
+        self.lbl_status = ctk.CTkLabel(
+            self,
+            text="🟢 Prêt — Système opérationnel",
+            font=FONTS['small'],
+            text_color=COLORS['text_secondary']
+        )
+        self.lbl_status.pack(side='left', padx=16)
+
+        # Droite : Utilisateur & Rôle
+        self.lbl_user = ctk.CTkLabel(
+            self,
+            text=f"👤 {user} ({role.upper()})  •  SARL NOMADE AYRIS",
+            font=FONTS['small_bold'],
+            text_color=COLORS['primary']
+        )
+        self.lbl_user.pack(side='right', padx=16)
+
+    def set_status(self, text: str, is_success: bool = True):
+        icon = "🟢 " if is_success else "🟡 "
+        self.lbl_status.configure(text=f"{icon}{text}")
+        self.after(5000, lambda: self.lbl_status.configure(text="🟢 Prêt — Système opérationnel"))
+
 
 
 def make_input(parent, placeholder='', width=220, textvariable=None):
