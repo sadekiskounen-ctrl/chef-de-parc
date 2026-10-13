@@ -17,7 +17,7 @@ from ui.theme import COLORS, FONTS, UNITES, format_money, format_qty, parse_qty
 from ui.widgets import (
     make_input, make_primary_button, make_secondary_button, make_danger_button,
     make_combobox, DatePickerWidget, bind_tree_clear_selection, AutocompleteEntry,
-    show_toast
+    show_toast, open_piece_search
 )
 
 
@@ -70,6 +70,20 @@ class BonLivraisonFrame(ctk.CTkFrame):
         self.e_date = DatePickerWidget(hdr_frame, placeholder='AAAA-MM-JJ', width=140, default_value=datetime.now().strftime('%Y-%m-%d'))
         self.e_date.grid(row=0, column=5, sticky='w')
 
+        self.var_tva = ctk.BooleanVar(value=False)
+        self.chk_tva = ctk.CTkCheckBox(
+            hdr_frame, text='TVA (19%)', variable=self.var_tva,
+            command=self._on_tva_toggled,
+            font=FONTS['body_bold'],
+            text_color=COLORS['text_primary'],
+            fg_color=COLORS['primary'],
+            hover_color=COLORS['primary_dark'],
+            checkmark_color='#FFFFFF',
+            corner_radius=6,
+            width=110
+        )
+        self.chk_tva.grid(row=0, column=6, padx=(14, 0), sticky='w')
+
         # Séparateur visuel subtil
         ctk.CTkFrame(form, fg_color=COLORS['border'], height=1).pack(fill='x', padx=14, pady=4)
 
@@ -81,14 +95,23 @@ class BonLivraisonFrame(ctk.CTkFrame):
         piece_desigs = [p['designation'] for p in all_pieces if p.get('designation')]
         piece_fours = [p['reference_fournisseur'] for p in all_pieces if p.get('reference_fournisseur')]
 
-        # Réf Interne avec autocomplétion
+        # Réf Interne avec autocomplétion + bouton recherche
         ctk.CTkLabel(art_input_frame, text='🔍 Réf Interne', font=FONTS['small_bold'], text_color=COLORS['text_secondary']).grid(row=0, column=0, padx=3, sticky='w')
+        ref_frame = ctk.CTkFrame(art_input_frame, fg_color='transparent')
+        ref_frame.grid(row=1, column=0, padx=3, pady=(2, 0), sticky='w')
         self.e_ref = AutocompleteEntry(
-            art_input_frame, placeholder='ex: PI-001', width=130,
+            ref_frame, placeholder='ex: PI-001', width=106,
             completion_list=piece_refs, on_select=self._on_piece_ref_changed
         )
-        self.e_ref.grid(row=1, column=0, padx=3, pady=(2, 0), sticky='w')
+        self.e_ref.pack(side='left')
         self.e_ref.entry.bind('<KeyRelease>', self._on_ref_typed, add='+')
+        import customtkinter as _ctk
+        _ctk.CTkButton(
+            ref_frame, text='🔎', width=32, height=38,
+            fg_color=COLORS['primary'], hover_color=COLORS['primary_dark'],
+            text_color='#FFFFFF', font=('Segoe UI Emoji', 14),
+            corner_radius=8, command=self._open_piece_search_dialog
+        ).pack(side='left', padx=(2, 0))
 
         # Réf Fournisseur
         ctk.CTkLabel(art_input_frame, text='Réf Fournisseur', font=FONTS['small_bold'], text_color=COLORS['text_secondary']).grid(row=0, column=1, padx=3, sticky='w')
@@ -271,6 +294,28 @@ class BonLivraisonFrame(ctk.CTkFrame):
         self.filter_end_date.delete(0, 'end')
         self.filter_query.delete(0, 'end')
         self.refresh()
+
+    def _open_piece_search_dialog(self):
+        """Ouvre le dialog de recherche/sélection de pièce."""
+        pieces = get_all_pieces()
+
+        def _on_piece_selected(piece: dict):
+            self.e_ref.set(piece.get('reference_interne', ''))
+            if piece.get('reference_fournisseur'):
+                self.e_four.set(piece['reference_fournisseur'])
+            if piece.get('designation'):
+                self.e_designation.set(piece['designation'])
+            if piece.get('emplacement'):
+                self.e_emplacement.delete(0, 'end')
+                self.e_emplacement.insert(0, piece['emplacement'])
+            if piece.get('unite'):
+                self.combo_unite.set(piece['unite'])
+            pu = piece.get('nouveau_prix_unitaire') or piece.get('ancien_prix_unitaire') or 0
+            if pu > 0:
+                self.e_prix.delete(0, 'end')
+                self.e_prix.insert(0, f"{pu:.2f}")
+
+        open_piece_search(self, pieces, on_select=_on_piece_selected)
 
     def _on_piece_ref_changed(self, choice=None):
         ref = self.e_ref.get().strip()
@@ -510,16 +555,19 @@ class BonLivraisonFrame(ctk.CTkFrame):
         self._cancel_article_edit()
         self._refresh_current_articles_tree()
 
+    def _on_tva_toggled(self):
+        self._refresh_current_articles_tree()
+
     def _refresh_current_articles_tree(self):
         for row in self.tree_current.get_children():
             self.tree_current.delete(row)
 
-        total_bon = 0.0
+        total_bon_ht = 0.0
         total_qte = 0.0
         for i, art in enumerate(self._current_articles, start=1):
             tot = float(art.get('prix_total', 0) or 0)
             q = float(art.get('quantite', 0) or 0)
-            total_bon += tot
+            total_bon_ht += tot
             total_qte += q
             self.tree_current.insert('', 'end', values=(
                 i,
@@ -533,9 +581,16 @@ class BonLivraisonFrame(ctk.CTkFrame):
                 format_money(tot)
             ))
 
-        self.lbl_bon_total.configure(
-            text=f"Articles : {len(self._current_articles)}  •  Qté Totale : {format_qty(total_qte)}  •  Montant Total Bon : {format_money(total_bon)}"
-        )
+        if self.var_tva.get():
+            montant_tva = total_bon_ht * 0.19
+            total_ttc = total_bon_ht + montant_tva
+            self.lbl_bon_total.configure(
+                text=f"Articles : {len(self._current_articles)}  •  Total HT : {format_money(total_bon_ht)}  •  TVA (19%) : {format_money(montant_tva)}  •  Total TTC : {format_money(total_ttc)}"
+            )
+        else:
+            self.lbl_bon_total.configure(
+                text=f"Articles : {len(self._current_articles)}  •  Qté Totale : {format_qty(total_qte)}  •  Montant Total Bon : {format_money(total_bon_ht)}"
+            )
 
     def load_selected_bon_into_form(self):
         """Charge le bon sélectionné dans l'historique dans le formulaire pour modification."""
@@ -568,6 +623,12 @@ class BonLivraisonFrame(ctk.CTkFrame):
             self.e_date.delete(0, 'end')
             self.e_date.insert(0, date_liv)
 
+        # Restaurer l'état de la case TVA
+        has_tva = bool(b.get('appliquer_tva', 0))
+        if not has_tva and articles:
+            has_tva = any(bool(art.get('appliquer_tva', 0)) for art in articles)
+        self.var_tva.set(has_tva)
+
         self._current_articles = []
         for art in articles:
             q = parse_qty(art.get('quantite', 0))
@@ -597,6 +658,8 @@ class BonLivraisonFrame(ctk.CTkFrame):
         num_bl = self.e_num_bl.get().strip()
         nom_four = self.e_nom_four.get().strip()
         date_liv = self.e_date.get().strip()
+        appliquer_tva = bool(self.var_tva.get())
+        taux_tva = 19.0 if appliquer_tva else 0.0
 
         if not num_bl:
             messagebox.showwarning('Attention', 'Veuillez saisir le numéro de bon de livraison (N° BL).')
@@ -621,6 +684,8 @@ class BonLivraisonFrame(ctk.CTkFrame):
             'nom_fournisseur': nom_four,
             'date_livraison': date_liv,
             'articles': self._current_articles,
+            'appliquer_tva': appliquer_tva,
+            'taux_tva': taux_tva,
             'utilisateur': 'Benkerrou Tarek'
         }
         pdf_path = generate_bon_reception_pdf(pdf_data)
@@ -629,7 +694,9 @@ class BonLivraisonFrame(ctk.CTkFrame):
         header_data = {
             'numero_bon_livraison': num_bl,
             'nom_fournisseur': nom_four,
-            'date_livraison': date_liv
+            'date_livraison': date_liv,
+            'appliquer_tva': 1 if appliquer_tva else 0,
+            'taux_tva': taux_tva
         }
         create_bon_reception_multi(header_data, self._current_articles, chemin_pdf=pdf_path)
 
@@ -683,11 +750,18 @@ class BonLivraisonFrame(ctk.CTkFrame):
             if not articles:
                 articles = get_bon_reception_details(b['numero_bon_livraison'])
 
+            has_tva = bool(b.get('appliquer_tva', 0))
+            if not has_tva and articles:
+                has_tva = any(bool(art.get('appliquer_tva', 0)) for art in articles)
+            taux_tva = float(b.get('taux_tva', 19.0) if has_tva else 0.0)
+
             pdf_path = generate_bon_reception_pdf({
                 'numero_bon_livraison': b['numero_bon_livraison'],
                 'nom_fournisseur': b.get('nom_fournisseur', ''),
                 'date_livraison': b.get('date_livraison', ''),
                 'articles': articles,
+                'appliquer_tva': has_tva,
+                'taux_tva': taux_tva,
                 'utilisateur': 'Benkerrou Tarek'
             })
             update_bon_reception_chemin_pdf(b['numero_bon_livraison'], pdf_path)
@@ -725,6 +799,7 @@ class BonLivraisonFrame(ctk.CTkFrame):
         self.e_prix.delete(0, 'end')
         self.e_date.delete(0, 'end')
         self.e_date.insert(0, datetime.now().strftime('%Y-%m-%d'))
+        self.var_tva.set(False)
         self.btn_save_bon.configure(text='✅ Enregistrer Bon & Générer PDF')
         self.lbl_art_hint.configure(text='💡 Cliquez sur n’importe quel article dans le tableau pour charger et modifier ses champs.', text_color=COLORS['text_muted'])
         self._clear_current_articles()
@@ -769,6 +844,7 @@ class BonLivraisonFrame(ctk.CTkFrame):
                     continue
 
             pdf_indicator = "📄 Disponible" if bon.get('chemin_pdf') and os.path.exists(bon.get('chemin_pdf')) else "📄 À générer"
+            tva_tag = " (TTC)" if bon.get('appliquer_tva') else ""
 
             self.tree_history.insert('', 'end', values=(
                 bon['numero_bon_livraison'],
@@ -776,6 +852,6 @@ class BonLivraisonFrame(ctk.CTkFrame):
                 date_liv or '—',
                 len(bon.get('articles', [])),
                 format_qty(bon.get('quantite_totale', 0)),
-                format_money(bon.get('montant_total', 0)),
+                format_money(bon.get('montant_total', 0)) + tva_tag,
                 pdf_indicator,
             ))

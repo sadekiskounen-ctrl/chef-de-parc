@@ -19,7 +19,7 @@ from ui.theme import COLORS, FONTS, UNITES, format_qty, parse_qty
 from ui.widgets import (
     make_input, make_primary_button, make_secondary_button, make_danger_button,
     make_combobox, DatePickerWidget, bind_tree_clear_selection, AutocompleteEntry,
-    show_toast
+    show_toast, open_piece_search
 )
 
 
@@ -104,14 +104,23 @@ class BonSortieFrame(ctk.CTkFrame):
         art_input_frame = ctk.CTkFrame(form, fg_color='transparent')
         art_input_frame.pack(fill='x', padx=14, pady=(4, 4))
 
-        # Réf Interne avec autocomplétion
+        # Réf Interne avec autocomplétion + bouton recherche
         ctk.CTkLabel(art_input_frame, text='🔍 Réf Interne', font=FONTS['small_bold'], text_color=COLORS['text_secondary']).grid(row=0, column=0, padx=3, sticky='w')
+        ref_frame = ctk.CTkFrame(art_input_frame, fg_color='transparent')
+        ref_frame.grid(row=1, column=0, padx=3, pady=(2, 0), sticky='w')
         self.e_ref = AutocompleteEntry(
-            art_input_frame, placeholder='ex: PI-001', width=140,
+            ref_frame, placeholder='ex: PI-001', width=118,
             completion_list=pieces_refs, on_select=self._on_piece_ref_changed
         )
-        self.e_ref.grid(row=1, column=0, padx=3, pady=(2, 0), sticky='w')
+        self.e_ref.pack(side='left')
         self.e_ref.entry.bind('<KeyRelease>', self._on_ref_typed, add='+')
+        import customtkinter as _ctk
+        _ctk.CTkButton(
+            ref_frame, text='🔎', width=32, height=38,
+            fg_color=COLORS['primary'], hover_color=COLORS['primary_dark'],
+            text_color='#FFFFFF', font=('Segoe UI Emoji', 14),
+            corner_radius=8, command=self._open_piece_search_dialog
+        ).pack(side='left', padx=(2, 0))
 
         # Désignation avec autocomplétion
         ctk.CTkLabel(art_input_frame, text='Désignation Pièce', font=FONTS['small_bold'], text_color=COLORS['text_secondary']).grid(row=0, column=1, padx=3, sticky='w')
@@ -284,6 +293,23 @@ class BonSortieFrame(ctk.CTkFrame):
         bind_tree_clear_selection(self.tree_history, clear_callback=self._on_history_unselect)
 
         self.refresh()
+
+    def _open_piece_search_dialog(self):
+        """Ouvre le dialog de recherche/sélection de pièce."""
+        pieces = get_all_pieces()
+
+        def _on_piece_selected(piece: dict):
+            self._syncing = True
+            self.e_ref.set(piece.get('reference_interne', ''))
+            self.e_designation.set(piece.get('designation', ''))
+            if piece.get('reference_fournisseur'):
+                self.e_four.set(piece['reference_fournisseur'])
+            if piece.get('unite'):
+                self.combo_unite.set(piece['unite'])
+            self._syncing = False
+            self._apply_piece_info(piece)
+
+        open_piece_search(self, pieces, on_select=_on_piece_selected)
 
     def _reset_filters(self):
         self.filter_start_date.delete(0, 'end')

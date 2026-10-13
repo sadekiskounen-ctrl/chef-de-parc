@@ -547,24 +547,77 @@ def generate_bon_reception_pdf(data: dict, output_path: str | None = None) -> st
             Paragraph(f"{tot:,.2f}", cell_tot_val),
         ])
 
+    col_widths = [0.8*cm, 2.2*cm, 2.0*cm, 4.2*cm, 2.0*cm, 1.4*cm, 1.5*cm, 2.2*cm, 2.3*cm]
+
     # Ligne Récapitulative Totale
-    tot_label_style = ParagraphStyle('tot_lbl', fontName='Helvetica-Bold', fontSize=9, textColor=COLOR_NAVY, alignment=TA_RIGHT)
-    tot_val_style = ParagraphStyle('tot_val', fontName='Helvetica-Bold', fontSize=10, textColor=COLOR_ROYAL, alignment=TA_RIGHT)
+    tot_label_style = ParagraphStyle('tot_lbl', fontName='Helvetica-Bold', fontSize=8.5, textColor=COLOR_NAVY, alignment=TA_RIGHT)
+    tot_val_style = ParagraphStyle('tot_val', fontName='Helvetica-Bold', fontSize=9.5, textColor=COLOR_ROYAL, alignment=TA_RIGHT)
+    tot_ttc_style = ParagraphStyle('tot_ttc', fontName='Helvetica-Bold', fontSize=10, textColor=COLOR_PRIMARY, alignment=TA_RIGHT)
 
     total_qte_display = str(int(total_qte)) if total_qte.is_integer() else f"{total_qte:.2f}".rstrip('0').rstrip('.')
-    table_data.append([
-        Paragraph('<b>TOTAL GÉNÉRAL :</b>', tot_label_style),
-        Paragraph('', cell_style),
-        Paragraph('', cell_style),
-        Paragraph(f'<b>{len(articles)} article(s)</b>', cell_style),
-        Paragraph('', cell_style),
-        Paragraph('', cell_style),
-        Paragraph(f'<b>{total_qte_display}</b>', cell_qty),
-        Paragraph('', cell_style),
-        Paragraph(f'<b>{total_general:,.2f} DZD</b>', tot_val_style),
-    ])
 
-    col_widths = [0.8*cm, 2.2*cm, 2.0*cm, 4.2*cm, 2.0*cm, 1.4*cm, 1.5*cm, 2.2*cm, 2.3*cm]
+    appliquer_tva = bool(data.get('appliquer_tva') or data.get('tva_applicable') or (data.get('taux_tva', 0) > 0))
+    taux_tva = float(data.get('taux_tva', 19.0) if appliquer_tva else 0.0)
+    if taux_tva <= 0 and appliquer_tva:
+        taux_tva = 19.0
+
+    if not appliquer_tva:
+        table_data.append([
+            Paragraph('<b>TOTAL GÉNÉRAL :</b>', tot_label_style),
+            Paragraph('', cell_style),
+            Paragraph('', cell_style),
+            Paragraph(f'<b>{len(articles)} article(s)</b>', cell_style),
+            Paragraph('', cell_style),
+            Paragraph('', cell_style),
+            Paragraph(f'<b>{total_qte_display}</b>', cell_qty),
+            Paragraph('', cell_style),
+            Paragraph(f'<b>{total_general:,.2f} DZD</b>', tot_val_style),
+        ])
+    else:
+        total_ht = total_general
+        montant_tva = total_ht * (taux_tva / 100.0)
+        total_ttc = total_ht + montant_tva
+
+        # Ligne 1 : Total HT
+        table_data.append([
+            Paragraph('<b>TOTAL HORS TAXES (HT) :</b>', tot_label_style),
+            Paragraph('', cell_style),
+            Paragraph('', cell_style),
+            Paragraph(f'<b>{len(articles)} article(s)</b>', cell_style),
+            Paragraph('', cell_style),
+            Paragraph('', cell_style),
+            Paragraph(f'<b>{total_qte_display}</b>', cell_qty),
+            Paragraph('', cell_style),
+            Paragraph(f'<b>{total_ht:,.2f} DZD</b>', tot_val_style),
+        ])
+
+        # Ligne 2 : TVA (19%)
+        tva_pct_str = f"{int(taux_tva)} %" if taux_tva.is_integer() else f"{taux_tva:.1f} %"
+        table_data.append([
+            Paragraph(f'<b>TVA ({tva_pct_str}) :</b>', tot_label_style),
+            Paragraph('', cell_style),
+            Paragraph('', cell_style),
+            Paragraph('', cell_style),
+            Paragraph('', cell_style),
+            Paragraph('', cell_style),
+            Paragraph('', cell_style),
+            Paragraph('', cell_style),
+            Paragraph(f'<b>{montant_tva:,.2f} DZD</b>', tot_val_style),
+        ])
+
+        # Ligne 3 : Total TTC / Total avec TVA
+        table_data.append([
+            Paragraph('<b>TOTAL GÉNÉRAL (AVEC TVA / TTC) :</b>', tot_label_style),
+            Paragraph('', cell_style),
+            Paragraph('', cell_style),
+            Paragraph('', cell_style),
+            Paragraph('', cell_style),
+            Paragraph('', cell_style),
+            Paragraph('', cell_style),
+            Paragraph('', cell_style),
+            Paragraph(f'<b>{total_ttc:,.2f} DZD</b>', tot_ttc_style),
+        ])
+
     table = Table(table_data, colWidths=col_widths, repeatRows=1)
     
     t_style = [
@@ -577,19 +630,44 @@ def generate_bon_reception_pdf(data: dict, output_path: str | None = None) -> st
         ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
         ('LEFTPADDING',   (0, 0), (-1, -1), 4),
         ('RIGHTPADDING',  (0, 0), (-1, -1), 4),
-        # Ligne de total
-        ('SPAN',          (0, -1), (2, -1)),
-        ('BACKGROUND',    (0, -1), (-1, -1), COLOR_ROW_ALT),
-        ('TOPPADDING',    (0, -1), (-1, -1), 8),
-        ('BOTTOMPADDING', (0, -1), (-1, -1), 8),
     ]
 
-    # Alternance des couleurs de lignes douces
-    for i in range(1, len(table_data) - 1):
+    # Alternance des couleurs de lignes pour les articles
+    for i in range(1, len(articles) + 1):
         bg = COLOR_WHITE if i % 2 == 1 else COLOR_LIGHT_BG
         t_style.append(('BACKGROUND', (0, i), (-1, i), bg))
         t_style.append(('TOPPADDING', (0, i), (-1, i), 6))
         t_style.append(('BOTTOMPADDING', (0, i), (-1, i), 6))
+
+    if not appliquer_tva:
+        t_style.extend([
+            ('SPAN',          (0, -1), (2, -1)),
+            ('BACKGROUND',    (0, -1), (-1, -1), COLOR_ROW_ALT),
+            ('TOPPADDING',    (0, -1), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, -1), (-1, -1), 8),
+        ])
+    else:
+        # Ligne Total HT
+        t_style.extend([
+            ('SPAN',          (0, -3), (2, -3)),
+            ('BACKGROUND',    (0, -3), (-1, -3), COLOR_ROW_ALT),
+            ('TOPPADDING',    (0, -3), (-1, -3), 6),
+            ('BOTTOMPADDING', (0, -3), (-1, -3), 6),
+        ])
+        # Ligne TVA 19%
+        t_style.extend([
+            ('SPAN',          (0, -2), (7, -2)),
+            ('BACKGROUND',    (0, -2), (-1, -2), COLOR_LIGHT_BG),
+            ('TOPPADDING',    (0, -2), (-1, -2), 6),
+            ('BOTTOMPADDING', (0, -2), (-1, -2), 6),
+        ])
+        # Ligne Total TTC
+        t_style.extend([
+            ('SPAN',          (0, -1), (7, -1)),
+            ('BACKGROUND',    (0, -1), (-1, -1), COLOR_ROW_ALT),
+            ('TOPPADDING',    (0, -1), (-1, -1), 7),
+            ('BOTTOMPADDING', (0, -1), (-1, -1), 7),
+        ])
 
     table.setStyle(TableStyle(t_style))
     story.append(table)

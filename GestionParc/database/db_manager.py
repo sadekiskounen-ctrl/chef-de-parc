@@ -162,6 +162,16 @@ def initialize_database() -> None:
         except sqlite3.OperationalError:
             pass
 
+        try:
+            cursor.execute('ALTER TABLE bons_livraison ADD COLUMN appliquer_tva INTEGER DEFAULT 0')
+        except sqlite3.OperationalError:
+            pass
+
+        try:
+            cursor.execute('ALTER TABLE bons_livraison ADD COLUMN taux_tva REAL DEFAULT 0.0')
+        except sqlite3.OperationalError:
+            pass
+
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS bons_sortie (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -527,6 +537,8 @@ def create_bon_reception_multi(header: dict, articles: list[dict], chemin_pdf: s
     num_bl = header.get('numero_bon_livraison', '').strip()
     nom_four = header.get('nom_fournisseur', '').strip()
     date_liv = header.get('date_livraison', datetime.now().strftime('%Y-%m-%d')).strip()
+    appliquer_tva = 1 if header.get('appliquer_tva') else 0
+    taux_tva = float(header.get('taux_tva', 19.0) if appliquer_tva else 0.0)
 
     conn = get_connection()
     try:
@@ -547,10 +559,11 @@ def create_bon_reception_multi(header: dict, articles: list[dict], chemin_pdf: s
                 INSERT INTO bons_livraison (
                     numero_bon_livraison, nom_fournisseur, reference_interne,
                     reference_fournisseur, designation, unite, quantite, prix_unitaire,
-                    prix_total, date_livraison, chemin_pdf, emplacement
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    prix_total, date_livraison, chemin_pdf, emplacement,
+                    appliquer_tva, taux_tva
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''',
-                (num_bl, nom_four, ref_int, ref_four, designation, unite, qty, pu, total, date_liv, chemin_pdf, emplacement)
+                (num_bl, nom_four, ref_int, ref_four, designation, unite, qty, pu, total, date_liv, chemin_pdf, emplacement, appliquer_tva, taux_tva)
             )
             inserted_ids.append(cursor.lastrowid)
 
@@ -604,6 +617,8 @@ def create_bon_reception_multi(header: dict, articles: list[dict], chemin_pdf: s
             'nom_fournisseur': nom_four,
             'date_livraison': date_liv,
             'nb_articles': len(articles),
+            'appliquer_tva': appliquer_tva,
+            'taux_tva': taux_tva,
             'inserted_ids': inserted_ids,
             'chemin_pdf': chemin_pdf
         }
@@ -636,6 +651,8 @@ def get_bons_reception_grouped() -> list[dict]:
             prix_total,
             date_livraison,
             COALESCE(chemin_pdf, '') AS chemin_pdf,
+            COALESCE(appliquer_tva, 0) AS appliquer_tva,
+            COALESCE(taux_tva, 0.0) AS taux_tva,
             date_creation
         FROM bons_livraison
         ORDER BY date_livraison DESC, id DESC
@@ -648,6 +665,8 @@ def get_bons_reception_grouped() -> list[dict]:
     for r in rows:
         key = r['num_bl_grouped']
         four_val = (r.get('nom_fournisseur') or '').strip()
+        has_tva = bool(r.get('appliquer_tva', 0))
+        taux_tva_val = float(r.get('taux_tva', 0.0) or (19.0 if has_tva else 0.0))
         if key not in grouped_map:
             grouped_map[key] = {
                 'id': r['id'],
@@ -656,19 +675,35 @@ def get_bons_reception_grouped() -> list[dict]:
                 'date_livraison': r.get('date_livraison') or '',
                 'chemin_pdf': r.get('chemin_pdf') or '',
                 'date_creation': r.get('date_creation') or '',
+                'appliquer_tva': 1 if has_tva else 0,
+                'taux_tva': taux_tva_val,
                 'articles': [],
+                'montant_ht': 0.0,
+                'montant_tva': 0.0,
                 'montant_total': 0.0,
                 'quantite_totale': 0,
             }
         else:
             if (not grouped_map[key]['nom_fournisseur'] or grouped_map[key]['nom_fournisseur'] == '—') and four_val:
                 grouped_map[key]['nom_fournisseur'] = four_val
+            if has_tva:
+                grouped_map[key]['appliquer_tva'] = 1
+                grouped_map[key]['taux_tva'] = taux_tva_val
 
         grouped_map[key]['articles'].append(r)
-        grouped_map[key]['montant_total'] += float(r.get('prix_total', 0) or 0)
+        grouped_map[key]['montant_ht'] += float(r.get('prix_total', 0) or 0)
         grouped_map[key]['quantite_totale'] = _clean_qty_num(grouped_map[key]['quantite_totale'] + _clean_qty_num(r.get('quantite', 0) or 0))
         if r.get('chemin_pdf') and not grouped_map[key]['chemin_pdf']:
             grouped_map[key]['chemin_pdf'] = r['chemin_pdf']
+
+    for g in grouped_map.values():
+        if g['appliquer_tva']:
+            t_rate = g['taux_tva'] if g['taux_tva'] > 0 else 19.0
+            g['montant_tva'] = g['montant_ht'] * (t_rate / 100.0)
+            g['montant_total'] = g['montant_ht'] + g['montant_tva']
+        else:
+            g['montant_tva'] = 0.0
+            g['montant_total'] = g['montant_ht']
 
     # Convertir en liste ordonnée
     result = list(grouped_map.values())

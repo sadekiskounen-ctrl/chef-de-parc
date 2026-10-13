@@ -28,6 +28,8 @@ COLORS = {
     'sidebar_text_active': '#FFFFFF',
     'sidebar_active_bg': '#004899',
     'sidebar_icon': '#00B5EC',
+    'white': '#FFFFFF',
+    'primary_hover': '#003366',
 }
 
 FONTS = {

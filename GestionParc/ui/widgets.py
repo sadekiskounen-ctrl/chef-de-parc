@@ -879,3 +879,257 @@ class MultiSelectCombobox(ctk.CTkFrame):
             self._selected_map[opt] = (opt.lower() in val_set or 'tous' in val_set)
         self.btn.configure(text=self._format_display_text())
 
+
+class PieceSearchDialog(ctk.CTkToplevel):
+    """
+    Fenêtre popup de recherche et sélection de pièce.
+    Affiche un champ de recherche rapide + tableau filtrable de toutes les pièces.
+    On_select(piece_dict) est appelé quand l'utilisateur valide son choix.
+    """
+
+    COLUMNS = ('ref', 'fournisseur', 'designation', 'famille', 'stock', 'emplacement', 'prix')
+    HEADINGS = {
+        'ref':         'Réf Interne',
+        'fournisseur': 'Réf Fournisseur',
+        'designation': 'Désignation',
+        'famille':     'Famille',
+        'stock':       'Stock',
+        'emplacement': 'Emplacement',
+        'prix':        'Prix Unit.',
+    }
+    WIDTHS = {'ref': 105, 'fournisseur': 105, 'designation': 200,
+              'famille': 100, 'stock': 65, 'emplacement': 110, 'prix': 90}
+
+    def __init__(self, parent, pieces: list[dict], on_select=None):
+        super().__init__(parent)
+        self.title("🔍 Rechercher une pièce")
+        self.geometry("820x480")
+        self.minsize(680, 380)
+        self.transient(parent.winfo_toplevel())
+        self.grab_set()
+        self.configure(fg_color=COLORS['bg_card'])
+
+        self._pieces = pieces
+        self._on_select = on_select
+        self._filtered = list(pieces)
+
+        # Centrer la fenêtre
+        try:
+            self.update_idletasks()
+            pw = parent.winfo_toplevel().winfo_width()
+            ph = parent.winfo_toplevel().winfo_height()
+            px = parent.winfo_toplevel().winfo_x()
+            py = parent.winfo_toplevel().winfo_y()
+            x = max(0, px + (pw - 820) // 2)
+            y = max(0, py + (ph - 480) // 2)
+            self.geometry(f"+{x}+{y}")
+        except Exception:
+            pass
+
+        self._build()
+
+    def _build(self):
+        import tkinter as tk
+        from tkinter import ttk
+
+        # ── En-tête ────────────────────────────────────────────────────────
+        hdr = ctk.CTkFrame(self, fg_color=COLORS['primary'], corner_radius=0, height=52)
+        hdr.pack(fill='x')
+        hdr.pack_propagate(False)
+        ctk.CTkLabel(
+            hdr, text='🔍  Rechercher une pièce',
+            font=FONTS['subtitle'], text_color='#FFFFFF'
+        ).pack(side='left', padx=18, pady=12)
+        ctk.CTkLabel(
+            hdr, text=f"{len(self._pieces)} pièce(s) disponible(s)",
+            font=FONTS['small'], text_color='#B3D0FF'
+        ).pack(side='right', padx=18)
+
+        # ── Barre de recherche ─────────────────────────────────────────────
+        search_bar = ctk.CTkFrame(self, fg_color=COLORS['bg_hover'], corner_radius=0, height=52)
+        search_bar.pack(fill='x')
+        search_bar.pack_propagate(False)
+
+        ctk.CTkLabel(search_bar, text='Recherche :', font=FONTS['body_bold'],
+                     text_color=COLORS['text_primary']).pack(side='left', padx=(14, 6), pady=10)
+
+        self._search_var = tk.StringVar()
+        search_entry = ctk.CTkEntry(
+            search_bar,
+            textvariable=self._search_var,
+            placeholder_text='Réf, désignation, fournisseur, famille, emplacement…',
+            fg_color=COLORS['bg_input'],
+            border_color=COLORS['border'],
+            border_width=1,
+            text_color=COLORS['text_primary'],
+            placeholder_text_color=COLORS['text_muted'],
+            font=FONTS['body'],
+            corner_radius=8,
+            height=36,
+            width=420,
+        )
+        search_entry.pack(side='left', pady=8)
+        search_entry.focus_set()
+
+        self._search_var.trace_add('write', lambda *_: self._filter())
+
+        # Bouton Vider
+        ctk.CTkButton(
+            search_bar, text='✖ Vider', width=80, height=36,
+            fg_color=COLORS['bg_hover'], hover_color=COLORS['border'],
+            text_color=COLORS['text_secondary'], border_color=COLORS['border'],
+            border_width=1, font=FONTS['body'], corner_radius=8,
+            command=lambda: self._search_var.set('')
+        ).pack(side='left', padx=8, pady=8)
+
+        # ── Tableau ────────────────────────────────────────────────────────
+        table_frame = ctk.CTkFrame(self, fg_color='transparent')
+        table_frame.pack(fill='both', expand=True, padx=10, pady=(6, 0))
+
+        style = ttk.Style()
+        style.configure('PieceSearch.Treeview',
+                        font=('Segoe UI', 10),
+                        rowheight=26,
+                        background='#FFFFFF',
+                        fieldbackground='#FFFFFF',
+                        foreground='#0F172A')
+        style.configure('PieceSearch.Treeview.Heading',
+                        font=('Segoe UI', 10, 'bold'),
+                        background='#E8F0FE',
+                        foreground='#0B2E6B')
+        style.map('PieceSearch.Treeview',
+                  background=[('selected', '#004899')],
+                  foreground=[('selected', '#FFFFFF')])
+
+        self._tree = ttk.Treeview(
+            table_frame,
+            columns=self.COLUMNS,
+            show='headings',
+            height=12,
+            style='PieceSearch.Treeview'
+        )
+        for col in self.COLUMNS:
+            self._tree.heading(col, text=self.HEADINGS[col],
+                               command=lambda c=col: self._sort_by(c))
+            self._tree.column(col, width=self.WIDTHS[col], anchor='center', stretch=True)
+        self._tree.column('designation', anchor='w')
+
+        vsb = ttk.Scrollbar(table_frame, orient='vertical', command=self._tree.yview)
+        self._tree.configure(yscrollcommand=vsb.set)
+        self._tree.pack(side='left', fill='both', expand=True)
+        vsb.pack(side='right', fill='y')
+
+        self._tree.bind('<Double-1>', lambda e: self._confirm())
+        self._tree.bind('<Return>', lambda e: self._confirm())
+
+        # Tag couleur critique
+        self._tree.tag_configure('critique', background='#FEE2E2', foreground='#B91C1C')
+
+        self._populate(self._pieces)
+
+        # ── Pied de page ───────────────────────────────────────────────────
+        footer = ctk.CTkFrame(self, fg_color='transparent', height=54)
+        footer.pack(fill='x', padx=10, pady=(4, 8))
+        footer.pack_propagate(False)
+
+        self._lbl_count = ctk.CTkLabel(
+            footer, text=f"{len(self._pieces)} résultat(s)",
+            font=FONTS['small'], text_color=COLORS['text_muted']
+        )
+        self._lbl_count.pack(side='left', padx=4)
+
+        ctk.CTkButton(
+            footer, text='✖ Fermer', width=110, height=38,
+            fg_color=COLORS['bg_hover'], hover_color=COLORS['border'],
+            text_color=COLORS['text_primary'], border_color=COLORS['border'],
+            border_width=1, font=FONTS['body_bold'], corner_radius=10,
+            command=self.destroy
+        ).pack(side='right', padx=(6, 0))
+
+        ctk.CTkButton(
+            footer, text='✅ Sélectionner', width=150, height=38,
+            fg_color=COLORS['primary'], hover_color=COLORS['primary_dark'],
+            text_color='#FFFFFF', font=FONTS['body_bold'], corner_radius=10,
+            command=self._confirm
+        ).pack(side='right')
+
+        ctk.CTkLabel(
+            footer, text='Double-clic ou Entrée pour sélectionner',
+            font=FONTS['small'], text_color=COLORS['text_muted']
+        ).pack(side='right', padx=16)
+
+    def _populate(self, pieces: list[dict]):
+        from ui.theme import format_money, format_qty
+        for row in self._tree.get_children():
+            self._tree.delete(row)
+        for p in pieces:
+            qte = float(p.get('quantite', 0) or 0)
+            seuil = float(p.get('seuil_alerte', 5) or 5)
+            is_critique = qte <= seuil
+            tags = ('critique',) if is_critique else ()
+            prix = p.get('nouveau_prix_unitaire') or p.get('ancien_prix_unitaire') or 0
+            self._tree.insert('', 'end', tags=tags, values=(
+                p.get('reference_interne', ''),
+                p.get('reference_fournisseur', '') or '—',
+                p.get('designation', ''),
+                p.get('famille_nom', '') or '—',
+                format_qty(qte),
+                p.get('emplacement', '') or '—',
+                format_money(prix),
+            ))
+        if self._lbl_count:
+            self._lbl_count.configure(text=f"{len(pieces)} résultat(s)")
+
+    def _filter(self):
+        query = self._search_var.get().strip().lower()
+        if not query:
+            self._filtered = list(self._pieces)
+        else:
+            tokens = query.split()
+            self._filtered = []
+            for p in self._pieces:
+                haystack = ' '.join([
+                    str(p.get('reference_interne', '') or ''),
+                    str(p.get('reference_fournisseur', '') or ''),
+                    str(p.get('designation', '') or ''),
+                    str(p.get('famille_nom', '') or ''),
+                    str(p.get('emplacement', '') or ''),
+                ]).lower()
+                if all(t in haystack for t in tokens):
+                    self._filtered.append(p)
+        self._populate(self._filtered)
+
+    def _sort_by(self, col: str):
+        """Tri ascendant/descendant sur la colonne cliquée."""
+        items = [(self._tree.set(k, col), k) for k in self._tree.get_children('')]
+        try:
+            items.sort(key=lambda t: float(t[0].replace(',', '.').replace(' ', '').replace('DZD', '')))
+        except ValueError:
+            items.sort(key=lambda t: t[0].lower())
+        for idx, (_, k) in enumerate(items):
+            self._tree.move(k, '', idx)
+
+    def _confirm(self):
+        sel = self._tree.selection()
+        if not sel:
+            return
+        values = self._tree.item(sel[0], 'values')
+        if not values:
+            return
+        ref = values[0]
+        # Retrouver la pièce complète
+        piece = next((p for p in self._filtered if p.get('reference_interne') == ref), None)
+        if piece and self._on_select:
+            try:
+                self._on_select(piece)
+            except Exception:
+                pass
+        self.destroy()
+
+
+def open_piece_search(parent, pieces: list[dict], on_select=None):
+    """Ouvre la fenêtre de recherche de pièce."""
+    dlg = PieceSearchDialog(parent, pieces, on_select=on_select)
+    dlg.focus_set()
+    return dlg
+
