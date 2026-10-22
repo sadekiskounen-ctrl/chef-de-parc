@@ -482,31 +482,61 @@ def generate_bon_reception_pdf(data: dict, output_path: str | None = None) -> st
     ))
 
     # Tableau Multi-Articles avec Emplacement
-    col_hdr_style = ParagraphStyle('ch_br', fontName='Helvetica-Bold', fontSize=8, textColor=COLOR_WHITE, alignment=TA_CENTER)
-    cell_style    = ParagraphStyle('c_br',  fontName='Helvetica', fontSize=8, textColor=COLOR_TEXT_DARK, leading=10)
-    cell_bold_txt = ParagraphStyle('cb_br', fontName='Helvetica-Bold', fontSize=8, textColor=COLOR_TEXT_DARK, leading=10)
-    cell_center   = ParagraphStyle('cc_br', fontName='Helvetica', fontSize=8, textColor=COLOR_TEXT_DARK, alignment=TA_CENTER)
-    cell_right    = ParagraphStyle('cr_br', fontName='Helvetica', fontSize=8, textColor=COLOR_TEXT_DARK, alignment=TA_RIGHT)
-    cell_qty      = ParagraphStyle('cq_br', fontName='Helvetica-Bold', fontSize=8.5, textColor=COLOR_ROYAL, alignment=TA_CENTER)
-    cell_tot_val  = ParagraphStyle('ct_br', fontName='Helvetica-Bold', fontSize=8.5, textColor=COLOR_NAVY, alignment=TA_RIGHT)
+    # splitLongWords=0 : empêche toute coupure de mot à mi-chemin (ex: "Four-\nnisseur")
+    col_hdr_style = ParagraphStyle('ch_br',
+        fontName='Helvetica-Bold', fontSize=7, textColor=COLOR_WHITE,
+        alignment=TA_CENTER, leading=9, splitLongWords=0
+    )
+    cell_style    = ParagraphStyle('c_br',
+        fontName='Helvetica', fontSize=8, textColor=COLOR_TEXT_DARK,
+        leading=10, splitLongWords=0
+    )
+    cell_bold_txt = ParagraphStyle('cb_br',
+        fontName='Helvetica-Bold', fontSize=8, textColor=COLOR_TEXT_DARK,
+        leading=10, splitLongWords=0
+    )
+    cell_center   = ParagraphStyle('cc_br',
+        fontName='Helvetica', fontSize=8, textColor=COLOR_TEXT_DARK,
+        alignment=TA_CENTER, leading=10, splitLongWords=0
+    )
+    cell_center_bold = ParagraphStyle('ccb_br',
+        fontName='Helvetica-Bold', fontSize=8, textColor=COLOR_TEXT_DARK,
+        alignment=TA_CENTER, leading=10, splitLongWords=0
+    )
+    cell_right    = ParagraphStyle('cr_br',
+        fontName='Helvetica', fontSize=8, textColor=COLOR_TEXT_DARK,
+        alignment=TA_RIGHT, leading=10, splitLongWords=0
+    )
+    cell_qty      = ParagraphStyle('cq_br',
+        fontName='Helvetica-Bold', fontSize=8.5, textColor=COLOR_ROYAL,
+        alignment=TA_CENTER, leading=11, splitLongWords=0
+    )
+    cell_tot_val  = ParagraphStyle('ct_br',
+        fontName='Helvetica-Bold', fontSize=8.5, textColor=COLOR_NAVY,
+        alignment=TA_RIGHT, leading=11, splitLongWords=0
+    )
 
+    # En-têtes courts pour éviter tout retour à la ligne dans les colonnes étroites
     table_data = [
         [
             Paragraph('N°', col_hdr_style),
-            Paragraph('Réf. Interne', col_hdr_style),
-            Paragraph('Réf. Fournisseur', col_hdr_style),
+            Paragraph('Réf.\nInterne', col_hdr_style),
+            Paragraph('Réf.\nFour.', col_hdr_style),
             Paragraph('Désignation Pièce / Article', col_hdr_style),
-            Paragraph('Emplacement', col_hdr_style),
+            Paragraph('Empl.', col_hdr_style),
             Paragraph('Unité', col_hdr_style),
             Paragraph('Qté', col_hdr_style),
-            Paragraph('Prix Unit. (DZD)', col_hdr_style),
-            Paragraph('Total (DZD)', col_hdr_style),
+            Paragraph('Prix Unit. (HT)', col_hdr_style),
+            Paragraph('TVA', col_hdr_style),
+            Paragraph('Total (HT)', col_hdr_style),
         ]
     ]
 
     articles = data.get('articles', [])
     total_general = 0.0
     total_qte = 0.0
+    total_tva_calc = 0.0
+    global_tva = bool(data.get('appliquer_tva') or data.get('tva_applicable'))
 
     if not articles:
         # Fallback si article unique passé à la racine de data
@@ -519,7 +549,48 @@ def generate_bon_reception_pdf(data: dict, output_path: str | None = None) -> st
             'quantite': data.get('quantite', 0),
             'prix_unitaire': data.get('prix_unitaire', 0),
             'prix_total': data.get('prix_total', 0),
+            'appliquer_tva': global_tva,
+            'taux_tva': 19.0 if global_tva else 0.0
         }]
+
+    def _format_amount_cell(amount: float, style_id: str, base_size: float = 9.0, min_size: float = 6.0, text_color=COLOR_NAVY, is_bold: bool = True, suffix: str = 'DZD') -> Paragraph:
+        """
+        Garantit que la somme entière s'affiche TOUJOURS sur UNE SEULE LIGNE dans le PDF.
+        Ajuste dynamiquement la taille de la police. splitLongWords=0 empêche la coupure des chiffres.
+        """
+        formatted_num = f"{amount:,.2f}"
+        # Utiliser des espaces insécables ( ) pour éviter la coupure entre le nombre et l'unité
+        full_text = f"{formatted_num} {suffix}" if suffix else formatted_num
+        char_count = len(formatted_num) + (len(suffix) + 1 if suffix else 0)
+
+        # Calcul dynamique de la taille de police pour empêcher tout retour à la ligne
+        if char_count <= 11:
+            font_sz = base_size
+        elif char_count <= 14:
+            font_sz = max(min_size, base_size - 1.0)
+        elif char_count <= 17:
+            font_sz = max(min_size, base_size - 1.8)
+        elif char_count <= 20:
+            font_sz = max(min_size, base_size - 2.5)
+        elif char_count <= 24:
+            font_sz = max(min_size, base_size - 3.0)
+        else:
+            font_sz = min_size
+
+        font_name = 'Helvetica-Bold' if is_bold else 'Helvetica'
+        p_style = ParagraphStyle(
+            f"{style_id}_{int(font_sz*10)}",
+            fontName=font_name,
+            fontSize=font_sz,
+            leading=font_sz + 2,
+            textColor=text_color,
+            alignment=TA_RIGHT,
+            splitLongWords=0,      # Ne jamais couper un mot/chiffre à mi-chemin
+            wordWrap='LTR',        # Word wrap normal (gauche à droite) - coupe UNIQUEMENT aux espaces
+        )
+        b_tag = '<b>' if is_bold else ''
+        b_end = '</b>' if is_bold else ''
+        return Paragraph(f"{b_tag}{full_text}{b_end}", p_style)
 
     for idx, art in enumerate(articles, start=1):
         try:
@@ -529,39 +600,51 @@ def generate_bon_reception_pdf(data: dict, output_path: str | None = None) -> st
             qte = float(art.get('quantite', 0) or 0)
         pu = float(art.get('prix_unitaire', 0) or 0)
         tot = float(art.get('prix_total', 0) or (qte * pu))
-        unite = str(art.get('unite', 'UNITE') or 'UNITE')
+        unite = str(art.get('unite', 'UNITE') or 'UNITE').upper()
         empl = str(art.get('emplacement') or '—')
         total_general += tot
         total_qte += qte
 
+        art_has_tva = bool(global_tva or art.get('appliquer_tva', 0))
+        art_taux = float(art.get('taux_tva', 19.0) or 19.0) if art_has_tva else 0.0
+        if art_has_tva and art_taux <= 0:
+            art_taux = 19.0
+
+        if art_has_tva:
+            total_tva_calc += tot * (art_taux / 100.0)
+            tva_str = f"{int(art_taux)} %" if art_taux.is_integer() else f"{art_taux:.1f} %"
+        else:
+            tva_str = "0 %"
+
         qte_display = str(int(qte)) if qte.is_integer() else f"{qte:.2f}".rstrip('0').rstrip('.')
+        pu_p  = _format_amount_cell(pu,  f'pu_{idx}',  base_size=8.0, min_size=5.5, text_color=COLOR_TEXT_DARK, is_bold=False, suffix='')
+        tot_p = _format_amount_cell(tot, f'tot_{idx}', base_size=8.5, min_size=5.5, text_color=COLOR_NAVY,      is_bold=True,  suffix='')
+
         table_data.append([
             Paragraph(str(idx), cell_center),
             Paragraph(f"<b>{str(art.get('reference_interne', ''))}</b>", cell_bold_txt),
             Paragraph(str(art.get('reference_fournisseur', '—')), cell_style),
             Paragraph(f"<b>{str(art.get('designation', ''))}</b>", cell_bold_txt),
             Paragraph(empl, cell_center),
-            Paragraph(f"<b>{unite.upper()}</b>", cell_center),
+            Paragraph(f"<b>{unite}</b>", cell_center_bold),
             Paragraph(qte_display, cell_qty),
-            Paragraph(f"{pu:,.2f}", cell_right),
-            Paragraph(f"{tot:,.2f}", cell_tot_val),
+            pu_p,
+            Paragraph(tva_str, cell_center),
+            tot_p,
         ])
 
-    col_widths = [0.8*cm, 2.2*cm, 2.0*cm, 4.2*cm, 2.0*cm, 1.4*cm, 1.5*cm, 2.2*cm, 2.3*cm]
+    # Largeurs optimisées : total = 18.6 cm (A4 - marges 1.2cm x2)
+    # Chaque colonne dimensionnée pour son contenu le plus large
+    col_widths = [0.6*cm, 1.9*cm, 1.7*cm, 3.8*cm, 1.6*cm, 1.3*cm, 0.9*cm, 2.3*cm, 1.0*cm, 3.5*cm]
 
     # Ligne Récapitulative Totale
     tot_label_style = ParagraphStyle('tot_lbl', fontName='Helvetica-Bold', fontSize=8.5, textColor=COLOR_NAVY, alignment=TA_RIGHT)
-    tot_val_style = ParagraphStyle('tot_val', fontName='Helvetica-Bold', fontSize=9.5, textColor=COLOR_ROYAL, alignment=TA_RIGHT)
-    tot_ttc_style = ParagraphStyle('tot_ttc', fontName='Helvetica-Bold', fontSize=10, textColor=COLOR_PRIMARY, alignment=TA_RIGHT)
-
     total_qte_display = str(int(total_qte)) if total_qte.is_integer() else f"{total_qte:.2f}".rstrip('0').rstrip('.')
 
-    appliquer_tva = bool(data.get('appliquer_tva') or data.get('tva_applicable') or (data.get('taux_tva', 0) > 0))
-    taux_tva = float(data.get('taux_tva', 19.0) if appliquer_tva else 0.0)
-    if taux_tva <= 0 and appliquer_tva:
-        taux_tva = 19.0
+    has_tva = total_tva_calc > 0
 
-    if not appliquer_tva:
+    if not has_tva:
+        tot_gen_p = _format_amount_cell(total_general, 'rec_gen', base_size=9.5, min_size=6.5, text_color=COLOR_ROYAL, is_bold=True, suffix='DZD')
         table_data.append([
             Paragraph('<b>TOTAL GÉNÉRAL :</b>', tot_label_style),
             Paragraph('', cell_style),
@@ -571,12 +654,16 @@ def generate_bon_reception_pdf(data: dict, output_path: str | None = None) -> st
             Paragraph('', cell_style),
             Paragraph(f'<b>{total_qte_display}</b>', cell_qty),
             Paragraph('', cell_style),
-            Paragraph(f'<b>{total_general:,.2f} DZD</b>', tot_val_style),
+            Paragraph('', cell_style),
+            tot_gen_p,
         ])
     else:
         total_ht = total_general
-        montant_tva = total_ht * (taux_tva / 100.0)
-        total_ttc = total_ht + montant_tva
+        total_ttc = total_ht + total_tva_calc
+
+        tot_ht_p = _format_amount_cell(total_ht, 'rec_ht', base_size=9.5, min_size=6.5, text_color=COLOR_ROYAL, is_bold=True, suffix='DZD')
+        tot_tva_p = _format_amount_cell(total_tva_calc, 'rec_tva', base_size=9.5, min_size=6.5, text_color=COLOR_ROYAL, is_bold=True, suffix='DZD')
+        tot_ttc_p = _format_amount_cell(total_ttc, 'rec_ttc', base_size=10.0, min_size=7.0, text_color=COLOR_PRIMARY, is_bold=True, suffix='DZD')
 
         # Ligne 1 : Total HT
         table_data.append([
@@ -588,13 +675,13 @@ def generate_bon_reception_pdf(data: dict, output_path: str | None = None) -> st
             Paragraph('', cell_style),
             Paragraph(f'<b>{total_qte_display}</b>', cell_qty),
             Paragraph('', cell_style),
-            Paragraph(f'<b>{total_ht:,.2f} DZD</b>', tot_val_style),
+            Paragraph('', cell_style),
+            tot_ht_p,
         ])
 
         # Ligne 2 : TVA (19%)
-        tva_pct_str = f"{int(taux_tva)} %" if taux_tva.is_integer() else f"{taux_tva:.1f} %"
         table_data.append([
-            Paragraph(f'<b>TVA ({tva_pct_str}) :</b>', tot_label_style),
+            Paragraph('<b>TVA (19%) :</b>', tot_label_style),
             Paragraph('', cell_style),
             Paragraph('', cell_style),
             Paragraph('', cell_style),
@@ -602,10 +689,11 @@ def generate_bon_reception_pdf(data: dict, output_path: str | None = None) -> st
             Paragraph('', cell_style),
             Paragraph('', cell_style),
             Paragraph('', cell_style),
-            Paragraph(f'<b>{montant_tva:,.2f} DZD</b>', tot_val_style),
+            Paragraph('', cell_style),
+            tot_tva_p,
         ])
 
-        # Ligne 3 : Total TTC / Total avec TVA
+        # Ligne 3 : Total TTC
         table_data.append([
             Paragraph('<b>TOTAL GÉNÉRAL (AVEC TVA / TTC) :</b>', tot_label_style),
             Paragraph('', cell_style),
@@ -615,7 +703,8 @@ def generate_bon_reception_pdf(data: dict, output_path: str | None = None) -> st
             Paragraph('', cell_style),
             Paragraph('', cell_style),
             Paragraph('', cell_style),
-            Paragraph(f'<b>{total_ttc:,.2f} DZD</b>', tot_ttc_style),
+            Paragraph('', cell_style),
+            tot_ttc_p,
         ])
 
     table = Table(table_data, colWidths=col_widths, repeatRows=1)
@@ -628,8 +717,8 @@ def generate_bon_reception_pdf(data: dict, output_path: str | None = None) -> st
         ('BOTTOMPADDING', (0, 0), (-1, 0),  7),
         ('GRID',          (0, 0), (-1, -1), 0.5, COLOR_BORDER),
         ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
-        ('LEFTPADDING',   (0, 0), (-1, -1), 4),
-        ('RIGHTPADDING',  (0, 0), (-1, -1), 4),
+        ('LEFTPADDING',   (0, 0), (-1, -1), 3),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 3),
     ]
 
     # Alternance des couleurs de lignes pour les articles
@@ -639,7 +728,7 @@ def generate_bon_reception_pdf(data: dict, output_path: str | None = None) -> st
         t_style.append(('TOPPADDING', (0, i), (-1, i), 6))
         t_style.append(('BOTTOMPADDING', (0, i), (-1, i), 6))
 
-    if not appliquer_tva:
+    if not has_tva:
         t_style.extend([
             ('SPAN',          (0, -1), (2, -1)),
             ('BACKGROUND',    (0, -1), (-1, -1), COLOR_ROW_ALT),
@@ -656,14 +745,14 @@ def generate_bon_reception_pdf(data: dict, output_path: str | None = None) -> st
         ])
         # Ligne TVA 19%
         t_style.extend([
-            ('SPAN',          (0, -2), (7, -2)),
+            ('SPAN',          (0, -2), (8, -2)),
             ('BACKGROUND',    (0, -2), (-1, -2), COLOR_LIGHT_BG),
             ('TOPPADDING',    (0, -2), (-1, -2), 6),
             ('BOTTOMPADDING', (0, -2), (-1, -2), 6),
         ])
         # Ligne Total TTC
         t_style.extend([
-            ('SPAN',          (0, -1), (7, -1)),
+            ('SPAN',          (0, -1), (8, -1)),
             ('BACKGROUND',    (0, -1), (-1, -1), COLOR_ROW_ALT),
             ('TOPPADDING',    (0, -1), (-1, -1), 7),
             ('BOTTOMPADDING', (0, -1), (-1, -1), 7),

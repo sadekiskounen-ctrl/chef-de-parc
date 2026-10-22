@@ -72,7 +72,7 @@ class BonLivraisonFrame(ctk.CTkFrame):
 
         self.var_tva = ctk.BooleanVar(value=False)
         self.chk_tva = ctk.CTkCheckBox(
-            hdr_frame, text='TVA (19%)', variable=self.var_tva,
+            hdr_frame, text='TVA Globale (19%)', variable=self.var_tva,
             command=self._on_tva_toggled,
             font=FONTS['body_bold'],
             text_color=COLORS['text_primary'],
@@ -80,7 +80,7 @@ class BonLivraisonFrame(ctk.CTkFrame):
             hover_color=COLORS['primary_dark'],
             checkmark_color='#FFFFFF',
             corner_radius=6,
-            width=110
+            width=150
         )
         self.chk_tva.grid(row=0, column=6, padx=(14, 0), sticky='w')
 
@@ -166,14 +166,14 @@ class BonLivraisonFrame(ctk.CTkFrame):
         # Instructions / indication d'édition
         self.lbl_art_hint = ctk.CTkLabel(
             table_art_box,
-            text='💡 Cliquez sur n’importe quel article dans le tableau pour charger et modifier ses champs.',
+            text='💡 Cliquez directement sur la case TVA (☑/☐) d\'une ligne pour activer ou désactiver sa TVA 19% (ou double-cliquez pour modifier).',
             font=FONTS['small'], text_color=COLORS['text_muted']
         )
         self.lbl_art_hint.pack(anchor='w', padx=10, pady=(6, 2))
 
         self.tree_current = ttk.Treeview(
             table_art_box,
-            columns=('idx', 'ref', 'four', 'desig', 'emplacement', 'unite', 'qte', 'prix', 'total'),
+            columns=('idx', 'ref', 'four', 'desig', 'emplacement', 'unite', 'qte', 'prix', 'tva', 'total'),
             show='headings', height=4
         )
         self.tree_current.heading('idx', text='N°')
@@ -183,27 +183,31 @@ class BonLivraisonFrame(ctk.CTkFrame):
         self.tree_current.heading('emplacement', text='Emplacement')
         self.tree_current.heading('unite', text='Unité')
         self.tree_current.heading('qte', text='Qté')
-        self.tree_current.heading('prix', text='Prix Unit.')
-        self.tree_current.heading('total', text='Total Ligne')
+        self.tree_current.heading('prix', text='Prix Unit. (HT)')
+        self.tree_current.heading('tva', text='TVA (19%)')
+        self.tree_current.heading('total', text='Total (HT)')
 
         self.tree_current.column('idx', width=35, anchor='center', stretch=False)
-        self.tree_current.column('ref', width=100, anchor='center', stretch=True)
-        self.tree_current.column('four', width=100, anchor='center', stretch=True)
-        self.tree_current.column('desig', width=170, anchor='w', stretch=True)
-        self.tree_current.column('emplacement', width=110, anchor='center', stretch=True)
-        self.tree_current.column('unite', width=70, anchor='center', stretch=False)
-        self.tree_current.column('qte', width=70, anchor='center', stretch=False)
-        self.tree_current.column('prix', width=105, anchor='center', stretch=True)
-        self.tree_current.column('total', width=115, anchor='center', stretch=True)
+        self.tree_current.column('ref', width=95, anchor='center', stretch=True)
+        self.tree_current.column('four', width=95, anchor='center', stretch=True)
+        self.tree_current.column('desig', width=160, anchor='w', stretch=True)
+        self.tree_current.column('emplacement', width=100, anchor='center', stretch=True)
+        self.tree_current.column('unite', width=65, anchor='center', stretch=False)
+        self.tree_current.column('qte', width=65, anchor='center', stretch=False)
+        self.tree_current.column('prix', width=95, anchor='center', stretch=True)
+        self.tree_current.column('tva', width=80, anchor='center', stretch=False)
+        self.tree_current.column('total', width=110, anchor='center', stretch=True)
         self.tree_current.pack(fill='x', padx=8, pady=(2, 6))
 
         self.tree_current.bind('<ButtonRelease-1>', self._on_current_article_select)
         self.tree_current.bind('<Double-1>', self._on_current_article_select)
+        self.tree_current.bind('<Button-1>', self._on_tree_current_click, add='+')
 
         # Barre d'actions sous le tableau d'articles
         sub_art_bar = ctk.CTkFrame(form, fg_color='transparent')
         sub_art_bar.pack(fill='x', padx=14, pady=(2, 10))
 
+        make_secondary_button(sub_art_bar, '☑/☐ Basculer TVA 19%', self._toggle_selected_article_tva, width=170, height=32).pack(side='left', padx=(0, 8))
         make_danger_button(sub_art_bar, '🗑️ Retirer l\'article sélectionné', self._remove_selected_article, width=220, height=32).pack(side='left', padx=(0, 8))
         make_secondary_button(sub_art_bar, 'Vider la liste', self._clear_current_articles, width=110, height=32).pack(side='left')
 
@@ -393,6 +397,56 @@ class BonLivraisonFrame(ctk.CTkFrame):
                     self.e_prix.delete(0, 'end')
                     self.e_prix.insert(0, f"{pu:.2f}")
 
+    def _on_tree_current_click(self, event):
+        """Permet de basculer la TVA (19% <-> 0%) d'un simple clic sur la colonne TVA dans le tableau."""
+        try:
+            col = self.tree_current.identify_column(event.x)
+            # La colonne #9 correspond à la colonne 'tva'
+            if col == '#9':
+                row_id = self.tree_current.identify_row(event.y)
+                if row_id:
+                    values = self.tree_current.item(row_id, 'values')
+                    if values:
+                        idx = int(values[0]) - 1
+                        self._toggle_article_tva(idx)
+        except Exception:
+            pass
+
+    def _toggle_article_tva(self, idx: int):
+        """Bascule la TVA 19% pour l'article à l'index donné dans _current_articles."""
+        if not (0 <= idx < len(self._current_articles)):
+            return
+        art = self._current_articles[idx]
+        current_val = bool(art.get('appliquer_tva', False))
+        new_val = not current_val
+        art['appliquer_tva'] = new_val
+        art['taux_tva'] = 19.0 if new_val else 0.0
+
+        # Si l'utilisateur désactive la TVA sur une ligne alors que la TVA globale était cochée,
+        # la TVA n'est plus globale sur l'ensemble du bon
+        if not new_val and self.var_tva.get():
+            self.var_tva.set(False)
+
+        self._refresh_current_articles_tree()
+        etat = "activée (☑ 19%)" if new_val else "désactivée (☐ 0%)"
+        ref = art.get('reference_interne', '')
+        show_toast(self, f"TVA {etat} pour l'article N° {idx + 1} ({ref})", 'info')
+
+    def _toggle_selected_article_tva(self):
+        """Bascule la TVA 19% pour l'article actuellement sélectionné dans le tableau."""
+        selected = self.tree_current.selection()
+        if not selected:
+            show_toast(self, 'Veuillez sélectionner un article dans le tableau pour modifier sa TVA.', 'warning')
+            return
+        values = self.tree_current.item(selected[0], 'values')
+        if not values:
+            return
+        try:
+            idx = int(values[0]) - 1
+            self._toggle_article_tva(idx)
+        except Exception:
+            pass
+
     def _on_current_article_select(self, event=None):
         selected = self.tree_current.selection()
         if not selected:
@@ -426,7 +480,10 @@ class BonLivraisonFrame(ctk.CTkFrame):
                 # Basculer le bouton en mode mise à jour
                 self.btn_add_art.configure(text='💾 Mettre à jour')
                 self.btn_cancel_art.configure(state='normal')
-                self.lbl_art_hint.configure(text=f'✏️ Modification de l’article N° {idx + 1} ({art.get("reference_interne", "")}) — Modifiez les champs ci-dessus puis cliquez sur "💾 Mettre à jour".', text_color=COLORS['primary'])
+                self.lbl_art_hint.configure(
+                    text=f'✏️ Modification de l’article N° {idx + 1} ({art.get("reference_interne", "")}) — Modifiez puis cliquez sur "💾 Mettre à jour". Pour changer la TVA, cliquez sur sa case (☑/☐).',
+                    text_color=COLORS['primary']
+                )
         except Exception:
             pass
 
@@ -434,7 +491,10 @@ class BonLivraisonFrame(ctk.CTkFrame):
         self._editing_article_idx = None
         self.btn_add_art.configure(text='➕ Ajouter')
         self.btn_cancel_art.configure(state='disabled')
-        self.lbl_art_hint.configure(text='💡 Cliquez sur n’importe quel article dans le tableau pour charger et modifier ses champs.', text_color=COLORS['text_muted'])
+        self.lbl_art_hint.configure(
+            text='💡 Cliquez directement sur la case TVA (☑/☐) d\'une ligne pour activer ou désactiver sa TVA 19% (ou double-cliquez pour modifier).',
+            text_color=COLORS['text_muted']
+        )
         
         # Réinitialiser la ligne de saisie
         self.e_ref.set('')
@@ -478,26 +538,44 @@ class BonLivraisonFrame(ctk.CTkFrame):
             return
 
         tot = qty * pu
-        article_data = {
-            'reference_interne': ref_int,
-            'reference_fournisseur': ref_four,
-            'designation': designation,
-            'emplacement': emplacement,
-            'unite': unite,
-            'quantite': qty,
-            'prix_unitaire': pu,
-            'prix_total': tot
-        }
 
         if self._editing_article_idx is not None and 0 <= self._editing_article_idx < len(self._current_articles):
-            # Mise à jour d'un article existant
+            # Mise à jour d'un article existant : préserver son statut TVA existant
+            prev_tva = bool(self._current_articles[self._editing_article_idx].get('appliquer_tva', False))
+            article_data = {
+                'reference_interne': ref_int,
+                'reference_fournisseur': ref_four,
+                'designation': designation,
+                'emplacement': emplacement,
+                'unite': unite,
+                'quantite': qty,
+                'prix_unitaire': pu,
+                'prix_total': tot,
+                'appliquer_tva': prev_tva,
+                'taux_tva': 19.0 if prev_tva else 0.0
+            }
             self._current_articles[self._editing_article_idx] = article_data
             self._editing_article_idx = None
             self.btn_add_art.configure(text='➕ Ajouter')
             self.btn_cancel_art.configure(state='disabled')
-            self.lbl_art_hint.configure(text='✅ Article mis à jour dans la liste. Cliquez sur "💾 Enregistrer les Modifications" ci-dessous pour valider définitivement le bon.', text_color=COLORS['success'])
+            self.lbl_art_hint.configure(text='✅ Article mis à jour dans la liste.', text_color=COLORS['success'])
             show_toast(self, f"Article {ref_int} mis à jour dans la liste.", 'success')
         else:
+            # Nouvel article ajouté : TVA active seulement si TVA Globale est cochée
+            initial_tva = bool(self.var_tva.get())
+            article_data = {
+                'reference_interne': ref_int,
+                'reference_fournisseur': ref_four,
+                'designation': designation,
+                'emplacement': emplacement,
+                'unite': unite,
+                'quantite': qty,
+                'prix_unitaire': pu,
+                'prix_total': tot,
+                'appliquer_tva': initial_tva,
+                'taux_tva': 19.0 if initial_tva else 0.0
+            }
+
             # Vérifier si la même référence est déjà dans la liste en cours
             existing_idx = None
             for idx, art in enumerate(self._current_articles):
@@ -520,10 +598,9 @@ class BonLivraisonFrame(ctk.CTkFrame):
                     old['emplacement'] = emplacement
                 show_toast(self, f"Quantité cumulée pour '{ref_int}' (Total : {format_qty(new_q)})", 'info')
             else:
-                # Ajout d'un nouvel article
+                # Ajout du nouvel article
                 self._current_articles.append(article_data)
                 show_toast(self, f"Article '{ref_int}' ajouté au bon.", 'success')
-                self.lbl_art_hint.configure(text='💡 Cliquez sur n’importe quel article dans le tableau pour charger et modifier ses champs.', text_color=COLORS['text_muted'])
 
         self._refresh_current_articles_tree()
 
@@ -556,6 +633,11 @@ class BonLivraisonFrame(ctk.CTkFrame):
         self._refresh_current_articles_tree()
 
     def _on_tva_toggled(self):
+        """Lorsque l'utilisateur coche ou décoche la case TVA Globale (19%)."""
+        is_global = bool(self.var_tva.get())
+        for art in self._current_articles:
+            art['appliquer_tva'] = is_global
+            art['taux_tva'] = 19.0 if is_global else 0.0
         self._refresh_current_articles_tree()
 
     def _refresh_current_articles_tree(self):
@@ -563,12 +645,28 @@ class BonLivraisonFrame(ctk.CTkFrame):
             self.tree_current.delete(row)
 
         total_bon_ht = 0.0
+        total_bon_tva = 0.0
         total_qte = 0.0
+        has_any_tva = False
+
         for i, art in enumerate(self._current_articles, start=1):
             tot = float(art.get('prix_total', 0) or 0)
             q = float(art.get('quantite', 0) or 0)
             total_bon_ht += tot
             total_qte += q
+            # ⚠️ RÈGLE STRICTE : chaque article affiche UNIQUEMENT son propre statut TVA.
+            # La case TVA Globale ne doit PAS forcer l'affichage TVA sur les articles
+            # qui n'ont pas individuellement leur TVA activée.
+            art_has_tva = bool(art.get('appliquer_tva', False))
+            if art_has_tva:
+                has_any_tva = True
+                rate = float(art.get('taux_tva', 19.0) or 19.0)
+                if rate <= 0:
+                    rate = 19.0
+                total_bon_tva += tot * (rate / 100.0)
+
+            # Affichage de la case à cocher visuelle dans le tableau
+            tva_icon = "☑ 19%" if art_has_tva else "☐ 0%"
             self.tree_current.insert('', 'end', values=(
                 i,
                 art.get('reference_interne', ''),
@@ -578,14 +676,14 @@ class BonLivraisonFrame(ctk.CTkFrame):
                 art.get('unite', 'UNITE'),
                 format_qty(q),
                 format_money(art.get('prix_unitaire', 0)),
+                tva_icon,
                 format_money(tot)
             ))
 
-        if self.var_tva.get():
-            montant_tva = total_bon_ht * 0.19
-            total_ttc = total_bon_ht + montant_tva
+        if has_any_tva or self.var_tva.get():
+            total_ttc = total_bon_ht + total_bon_tva
             self.lbl_bon_total.configure(
-                text=f"Articles : {len(self._current_articles)}  •  Total HT : {format_money(total_bon_ht)}  •  TVA (19%) : {format_money(montant_tva)}  •  Total TTC : {format_money(total_ttc)}"
+                text=f"Articles : {len(self._current_articles)}  •  Total HT : {format_money(total_bon_ht)}  •  TVA (19%) : {format_money(total_bon_tva)}  •  Total TTC : {format_money(total_ttc)}"
             )
         else:
             self.lbl_bon_total.configure(
@@ -623,17 +721,21 @@ class BonLivraisonFrame(ctk.CTkFrame):
             self.e_date.delete(0, 'end')
             self.e_date.insert(0, date_liv)
 
-        # Restaurer l'état de la case TVA
-        has_tva = bool(b.get('appliquer_tva', 0))
-        if not has_tva and articles:
-            has_tva = any(bool(art.get('appliquer_tva', 0)) for art in articles)
-        self.var_tva.set(has_tva)
+        # RÈGLE FONDAMENTALE : Ne JAMAIS imposer la TVA globale à tous les articles lors du chargement.
+        # self.var_tva n'est cochée QUE si :
+        # 1. TOUS les articles du bon ont individuellement la TVA active ET
+        # 2. Le bon a été explicitement enregistré avec TVA globale.
+        all_arts_have_tva = bool(articles) and all(bool(art.get('appliquer_tva', 0)) for art in articles)
+        is_global = bool(b.get('tva_globale', 0)) or (bool(b.get('appliquer_tva', 0)) and all_arts_have_tva)
+        self.var_tva.set(is_global)
 
         self._current_articles = []
         for art in articles:
             q = parse_qty(art.get('quantite', 0))
             pu = float(art.get('prix_unitaire', 0) or 0)
             tot = float(art.get('prix_total', 0) or (q * pu))
+            # Chaque article conserve strictement son propre statut TVA enregistré en base
+            art_has_tva = bool(art.get('appliquer_tva', 0))
             self._current_articles.append({
                 'reference_interne': art.get('reference_interne', ''),
                 'reference_fournisseur': art.get('reference_fournisseur', ''),
@@ -642,14 +744,16 @@ class BonLivraisonFrame(ctk.CTkFrame):
                 'unite': art.get('unite', 'UNITE') or 'UNITE',
                 'quantite': q,
                 'prix_unitaire': pu,
-                'prix_total': tot
+                'prix_total': tot,
+                'appliquer_tva': art_has_tva,
+                'taux_tva': float(art.get('taux_tva', 19.0) if art_has_tva else 0.0)
             })
 
         self.btn_save_bon.configure(text='💾 Enregistrer les Modifications du Bon')
         self._cancel_article_edit()
         self._refresh_current_articles_tree()
         self.lbl_art_hint.configure(
-            text=f'✏️ Modification du Bon "{num_bl}" : Fournisseur "{nom_four or "Non renseigné"}". Ajustez les champs ou articles puis cliquez sur "💾 Enregistrer les Modifications du Bon".',
+            text=f'✏️ Modification du Bon "{num_bl}" : Fournisseur "{nom_four or "Non renseigné"}". Cliquez directement sur la case TVA (☑/☐) d\'une ligne pour l\'activer ou la désactiver.',
             text_color=COLORS['primary']
         )
         show_toast(self, f"Bon '{num_bl}' chargé ({len(self._current_articles)} article(s)).", 'info')
@@ -658,8 +762,7 @@ class BonLivraisonFrame(ctk.CTkFrame):
         num_bl = self.e_num_bl.get().strip()
         nom_four = self.e_nom_four.get().strip()
         date_liv = self.e_date.get().strip()
-        appliquer_tva = bool(self.var_tva.get())
-        taux_tva = 19.0 if appliquer_tva else 0.0
+        global_tva = bool(self.var_tva.get())
 
         if not num_bl:
             messagebox.showwarning('Attention', 'Veuillez saisir le numéro de bon de livraison (N° BL).')
@@ -673,6 +776,15 @@ class BonLivraisonFrame(ctk.CTkFrame):
                 messagebox.showwarning('Attention', 'Veuillez ajouter au moins un article à ce bon de réception.')
                 return
 
+        # S'assurer que chaque article conserve bien son propre statut TVA
+        for art in self._current_articles:
+            if global_tva:
+                art['appliquer_tva'] = True
+                art['taux_tva'] = 19.0
+            else:
+                art['appliquer_tva'] = bool(art.get('appliquer_tva', False))
+                art['taux_tva'] = 19.0 if art['appliquer_tva'] else 0.0
+
         # Si le bon existe déjà dans la base, on supprime l'ancienne version avant de réenregistrer
         existing_bons = [b for b in get_bons_reception_grouped() if str(b['numero_bon_livraison']) == str(num_bl)]
         if existing_bons:
@@ -684,19 +796,21 @@ class BonLivraisonFrame(ctk.CTkFrame):
             'nom_fournisseur': nom_four,
             'date_livraison': date_liv,
             'articles': self._current_articles,
-            'appliquer_tva': appliquer_tva,
-            'taux_tva': taux_tva,
+            'appliquer_tva': global_tva,
+            'taux_tva': 19.0 if global_tva else 0.0,
             'utilisateur': 'Benkerrou Tarek'
         }
         pdf_path = generate_bon_reception_pdf(pdf_data)
 
-        # Enregistrement en base de données avec mise à jour automatique des stocks
+        # Enregistrement en base de données :
+        # RÈGLE CAPITALE : 'appliquer_tva' dans header n'est 1 QUE SI LA TVA EST GLOBALE SUR TOUT LE BON !
+        # Si certains articles ont la TVA et d'autres non, header appliquer_tva = 0 pour ne pas contaminer les autres articles.
         header_data = {
             'numero_bon_livraison': num_bl,
             'nom_fournisseur': nom_four,
             'date_livraison': date_liv,
-            'appliquer_tva': 1 if appliquer_tva else 0,
-            'taux_tva': taux_tva
+            'appliquer_tva': 1 if global_tva else 0,
+            'taux_tva': 19.0 if global_tva else 0.0
         }
         create_bon_reception_multi(header_data, self._current_articles, chemin_pdf=pdf_path)
 
@@ -750,9 +864,9 @@ class BonLivraisonFrame(ctk.CTkFrame):
             if not articles:
                 articles = get_bon_reception_details(b['numero_bon_livraison'])
 
-            has_tva = bool(b.get('appliquer_tva', 0))
-            if not has_tva and articles:
-                has_tva = any(bool(art.get('appliquer_tva', 0)) for art in articles)
+            all_arts_have_tva = bool(articles) and all(bool(art.get('appliquer_tva', 0)) for art in articles)
+            global_tva = bool(b.get('appliquer_tva', 0)) and all_arts_have_tva
+            has_tva = global_tva or any(bool(art.get('appliquer_tva', 0)) for art in articles)
             taux_tva = float(b.get('taux_tva', 19.0) if has_tva else 0.0)
 
             pdf_path = generate_bon_reception_pdf({
@@ -760,7 +874,7 @@ class BonLivraisonFrame(ctk.CTkFrame):
                 'nom_fournisseur': b.get('nom_fournisseur', ''),
                 'date_livraison': b.get('date_livraison', ''),
                 'articles': articles,
-                'appliquer_tva': has_tva,
+                'appliquer_tva': global_tva,
                 'taux_tva': taux_tva,
                 'utilisateur': 'Benkerrou Tarek'
             })

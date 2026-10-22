@@ -554,6 +554,17 @@ def create_bon_reception_multi(header: dict, articles: list[dict], chemin_pdf: s
             pu = float(art.get('prix_unitaire', 0) or 0)
             total = float(art.get('prix_total', 0) or (qty * pu))
 
+            # Si la TVA globale est activée sur tout le bon, tous les articles la reçoivent.
+            # Sinon, chaque article conserve strictement son propre choix de TVA.
+            if appliquer_tva:
+                art_has_tva = 1
+                art_taux = 19.0
+            else:
+                art_has_tva = 1 if art.get('appliquer_tva') else 0
+                art_taux = float(art.get('taux_tva', 19.0) if art_has_tva else 0.0)
+                if art_has_tva and art_taux <= 0:
+                    art_taux = 19.0
+
             cursor.execute(
                 '''
                 INSERT INTO bons_livraison (
@@ -563,7 +574,7 @@ def create_bon_reception_multi(header: dict, articles: list[dict], chemin_pdf: s
                     appliquer_tva, taux_tva
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''',
-                (num_bl, nom_four, ref_int, ref_four, designation, unite, qty, pu, total, date_liv, chemin_pdf, emplacement, appliquer_tva, taux_tva)
+                (num_bl, nom_four, ref_int, ref_four, designation, unite, qty, pu, total, date_liv, chemin_pdf, emplacement, art_has_tva, art_taux)
             )
             inserted_ids.append(cursor.lastrowid)
 
@@ -697,13 +708,29 @@ def get_bons_reception_grouped() -> list[dict]:
             grouped_map[key]['chemin_pdf'] = r['chemin_pdf']
 
     for g in grouped_map.values():
-        if g['appliquer_tva']:
-            t_rate = g['taux_tva'] if g['taux_tva'] > 0 else 19.0
-            g['montant_tva'] = g['montant_ht'] * (t_rate / 100.0)
-            g['montant_total'] = g['montant_ht'] + g['montant_tva']
+        tva_total = 0.0
+        arts_with_tva = 0
+        total_arts = len(g['articles'])
+
+        for a in g['articles']:
+            if a.get('appliquer_tva'):
+                arts_with_tva += 1
+                rate = float(a.get('taux_tva', 19.0) or 19.0)
+                if rate <= 0:
+                    rate = 19.0
+                tva_total += float(a.get('prix_total', 0) or 0) * (rate / 100.0)
+
+        # TVA globale SEULEMENT si TOUS les articles ont la TVA et que le bon a été enregistré en TVA globale
+        if total_arts > 0 and arts_with_tva == total_arts and g.get('appliquer_tva'):
+            g['appliquer_tva'] = 1
+            g['tva_globale'] = 1
         else:
-            g['montant_tva'] = 0.0
-            g['montant_total'] = g['montant_ht']
+            g['appliquer_tva'] = 0
+            g['tva_globale'] = 0
+
+        g['has_tva'] = 1 if tva_total > 0 else 0
+        g['montant_tva'] = tva_total
+        g['montant_total'] = g['montant_ht'] + tva_total
 
     # Convertir en liste ordonnée
     result = list(grouped_map.values())
